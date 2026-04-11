@@ -17,6 +17,7 @@ import {
 export {
   getAssetFromCanonical,
   getCanonicalFromAsset,
+  wallet,
 } from "@shared/helpers/stellar";
 
 import { TransactionInfo } from "types/transactions";
@@ -24,6 +25,7 @@ import { parsedSearchParam, getUrlHostname } from "./urls";
 import { isContractId } from "@shared/api/helpers/soroban";
 
 export const SIGN_MESSAGE_PREFIX = "Stellar Signed Message:\n";
+
 
 export const encodeSep53Message = (message: string) => {
   const messageBytes = Buffer.from(message, "utf8");
@@ -245,7 +247,7 @@ export const isValidStellarAddress = (publicKey: string): boolean => {
   }
 };
 
-export const isFederationAddress = (address: string) => address.includes("*");
+export const isFederationAddress = (address: string) => address?.includes("*");
 
 export const isValidDomain = (input: string) => {
   // eslint-disable-next-line no-useless-escape
@@ -290,3 +292,23 @@ export const isActiveNetwork = (
   networkA: NetworkDetails,
   networkB: NetworkDetails,
 ) => isEqual(networkA, networkB);
+
+/**
+ * Generates a StellarExpert URL for a transaction based on the simplified network type.
+ *
+ * @param txHash The transaction hash
+ * @param networkDetails The current network details from settings
+ * @returns The full URL to the transaction on StellarExpert
+ */
+export const getExplorerUrl = (txHash: string, networkDetails: NetworkDetails) => {
+  const networkPath = isMainnet(networkDetails) ? "public" : "testnet";
+  return `https://stellar.expert/explorer/${networkPath}/tx/${txHash}`;
+};
+
+/**
+ * Generates a StellarExpert URL for an account based on the network details.
+ */
+export const getAccountExplorerUrl = (address: string, networkDetails: NetworkDetails) => {
+  const networkPath = isMainnet(networkDetails) ? "public" : "testnet";
+  return `https://stellar.expert/explorer/${networkPath}/account/${address}`;
+};

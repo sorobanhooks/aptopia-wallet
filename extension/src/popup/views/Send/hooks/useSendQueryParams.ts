@@ -101,7 +101,7 @@ export function useSendQueryParams() {
         try {
           const asset = getAssetFromCanonical(assetParam);
           dispatch(saveAsset(assetParam));
-          dispatch(saveIsToken(isContractId(asset.issuer)));
+          dispatch(saveIsToken(isContractId(asset?.issuer || "")));
         } catch {
           // Invalid asset param, ignore and use default
           if (!srcAsset) {

@@ -39,6 +39,7 @@ import { publicKeySelector } from "popup/ducks/accountServices";
 import { reRouteOnboarding } from "popup/helpers/route";
 import { KeyIdenticon } from "popup/components/identicons/KeyIdenticon";
 import { getSiteFavicon } from "popup/helpers/getSiteFavicon";
+import { ROUTES } from "popup/constants/routes";
 import { AuthEntries } from "popup/components/AuthEntry";
 import { useMarkQueueActive } from "popup/helpers/useMarkQueueActive";
 
@@ -53,6 +54,8 @@ export const SignAuthEntry = () => {
   );
 
   const params = parsedSearchParam(location.search) as EntryToSign;
+  
+
   const { accountToSign, domain } = params;
   const { isDomainListedAllowed } = useIsDomainListedAllowed({
     domain,
@@ -89,6 +92,10 @@ export const SignAuthEntry = () => {
     getData();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  if (!params || !params.uuid || !params.entry) {
+    return <Navigate to={ROUTES.account} replace />;
+  }
 
   const isLoading =
     signAuthEntryData.state === RequestState.IDLE ||

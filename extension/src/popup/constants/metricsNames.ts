@@ -182,4 +182,8 @@ export const METRIC_NAMES = {
 
   coinbaseOnrampOpened: "coinbase onramp: opened",
   wallets: "loaded screen: wallets",
+  viewDashboard: "loaded screen: dashboard",
+  viewAgentConfig: "loaded screen: agent config",
+  viewActivityLog: "loaded screen: activity log",
+  viewConfirmTrade: "loaded screen: confirm trade",
 };

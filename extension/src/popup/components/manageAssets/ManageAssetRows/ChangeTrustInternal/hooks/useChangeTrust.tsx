@@ -22,7 +22,7 @@ export interface ChangeTrustData {
 function useGetChangeTrust() {
   const { t } = useTranslation();
   const [state, dispatch] = useReducer(
-    reducer<ChangeTrustData, unknown>,
+    reducer<ChangeTrustData, any>,
     initialState,
   );
   const reduxDispatch = useDispatch<AppDispatch>();

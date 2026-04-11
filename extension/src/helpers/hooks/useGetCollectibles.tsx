@@ -118,13 +118,40 @@ function useGetCollectibles({
 
         // Fetch collectibles from API
         // storedContracts may be empty, but this will still return special-cased collectibles like Meridian Pay
-        const collections = await fetchCollectibles({
+        let collections = await fetchCollectibles({
           publicKey,
           contracts: storedContracts.map((c) => ({
             id: c.id,
             token_ids: c.token_ids || [],
           })),
           networkDetails,
+        });
+
+        // --- MERGE FALLBACK ---
+        // If the indexer hasn't indexed our newly added testnet NFTs or doesn't track their dummy owner state,
+        // they won't be returned from fetchCollectibles. We manually merge them here using local storage data.
+        storedCollectibles.collectiblesList.forEach((storedCollItem) => {
+          const storedColl = storedCollItem as typeof storedCollItem & { metadata?: any };
+          const exists = collections.some(
+            (c) => c.collection?.address === storedColl.id,
+          );
+          if (!exists && storedColl.metadata) {
+            collections.push({
+              collection: {
+                address: storedColl.id,
+                name: storedColl.metadata?.name || "Unknown Contract",
+                symbol: storedColl.metadata?.symbol || "UNK",
+                collectibles: storedColl.tokenIds.map((tid) => ({
+                  collectionAddress: storedColl.id,
+                  collectionName: storedColl.metadata?.name || "Unknown Contract",
+                  metadata: storedColl.metadata,
+                  owner: publicKey,
+                  tokenUri: storedColl.metadata?.tokenUri || "",
+                  tokenId: tid,
+                })),
+              },
+            });
+          }
         });
 
         // Preload images in background (non-blocking with timeout)

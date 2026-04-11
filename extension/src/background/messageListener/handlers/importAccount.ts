@@ -1,5 +1,5 @@
 import { Store } from "redux";
-import { Keypair } from "stellar-sdk";
+import { wallet as sdkWallet } from "@shared/helpers/stellar";
 import { KeyManager } from "@stellar/typescript-wallet-sdk-km";
 import { captureException } from "@sentry/browser";
 
@@ -34,16 +34,15 @@ export const importAccount = async ({
   keyManager: KeyManager;
   sessionTimer: SessionTimer;
 }) => {
-  const { password, privateKey } = request;
-  let sourceKeys;
+  const { password, privateKey, mnemonicPhrase } = request;
 
-  let mnemonicPhrase = await getEncryptedTemporaryData({
+  let storedMnemonicPhrase = await getEncryptedTemporaryData({
     sessionStore,
     localStore,
     keyName: TEMPORARY_STORE_EXTRA_ID,
   });
 
-  if (!mnemonicPhrase) {
+  if (!storedMnemonicPhrase) {
     try {
       await loginToAllAccounts(
         password,
@@ -52,7 +51,7 @@ export const importAccount = async ({
         keyManager,
         sessionTimer,
       );
-      mnemonicPhrase = await getEncryptedTemporaryData({
+      storedMnemonicPhrase = await getEncryptedTemporaryData({
         sessionStore,
         localStore,
         keyName: TEMPORARY_STORE_EXTRA_ID,
@@ -70,45 +69,56 @@ export const importAccount = async ({
   const keyID = (await getIsHardwareWalletActive({ localStore }))
     ? await getNonHwKeyID({ localStore })
     : (await localStore.getItem(KEY_ID)) || "";
-  // if the session is active, confirm that the password is correct and the hashkey properly unlocks
-  let activePrivateKey = "";
 
   try {
-    await unlockKeystore({ keyID, password, keyManager });
-    activePrivateKey = await getEncryptedTemporaryData({
-      sessionStore,
-      localStore,
-      keyName: keyID,
-    });
-    sourceKeys = Keypair.fromSecret(privateKey);
-  } catch (e) {
-    console.error(e);
-    return { error: "Please enter a valid secret key/password combination" };
-  }
+    if (keyID) {
+      await unlockKeystore({ keyID, password, keyManager });
+    }
 
-  const keyPair = {
-    publicKey: sourceKeys.publicKey(),
-    privateKey,
-  };
+    let importedPublicKey: string;
 
-  try {
+    if (mnemonicPhrase && mnemonicPhrase.trim()) {
+      // ── Mnemonic import path (SDK ONLY) ───────────────────────────────────
+      importedPublicKey = await sdkWallet.importFromMnemonic(
+        mnemonicPhrase,
+        password,
+      );
+    } else {
+      // ── Secret-key import path (SDK ONLY) ─────────────────────────────────
+      importedPublicKey = await sdkWallet.importFromSecretKey(
+        privateKey,
+        password,
+      );
+    }
+
+    // Retrieve the secret key directly from the SDK's internal state
+    // This removes the need for manual derivation/stellar-hd-wallet fetch
+    const sdkKeypair = (sdkWallet as any).keypairs.get(importedPublicKey);
+    const resolvedPrivateKey = sdkKeypair.secret();
+
+    const keyPair = {
+      publicKey: importedPublicKey,
+      privateKey: resolvedPrivateKey,
+    };
+
     await storeAccount({
       password,
       keyPair,
-      mnemonicPhrase,
+      mnemonicPhrase: storedMnemonicPhrase,
       imported: true,
       sessionStore,
       localStore,
       keyManager,
     });
-  } catch (e) {
-    captureException(`Error importing account: ${JSON.stringify(e)}`);
-    return { error: "Error importing account" };
-  }
-
-  if (!activePrivateKey) {
-    captureException("Error decrypting active private key in Import Account");
-    return { error: "Error importing account" };
+  } catch (e: any) {
+    console.error(e);
+    const errMsg = e.message || "";
+    if (errMsg.toLowerCase().includes("mnemonic")) {
+      return { error: "Please enter a valid 12/24-word recovery phrase" };
+    }
+    return {
+      error: e.error || "Please enter a valid secret key/password combination",
+    };
   }
 
   const currentState = sessionStore.getState();

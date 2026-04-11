@@ -3,6 +3,7 @@ import { useDispatch, useSelector } from "react-redux";
 
 import { NetworkDetails } from "@shared/constants/stellar";
 import { Balance } from "@shared/api/types";
+import { RequestState } from "../../constants/request";
 import { initialState, isError, reducer } from "helpers/request";
 
 import { ManageAssetCurrency } from "popup/components/manageAssets/ManageAssetRows";
@@ -55,7 +56,6 @@ export function useGetAssetDomainsWithBalances(getBalancesOptions: {
   const { fetchData: fetchBalances } = useGetBalances(getBalancesOptions);
 
   const fetchData = async (useCache = false): Promise<AssetDomains | Error> => {
-    dispatch({ type: "FETCH_DATA_START" });
     try {
       const appData = await fetchAppData(useCache);
       if (isError(appData)) {
@@ -70,6 +70,18 @@ export function useGetAssetDomainsWithBalances(getBalancesOptions: {
       const publicKey = appData.account.publicKey;
       const networkDetails = appData.settings.networkDetails;
       const isMainnetNetwork = isMainnet(networkDetails);
+
+      // STALE-WHILE-REVALIDATE: If cache is requested and available, 
+      // we can construct an initial payload from what we have.
+      if (useCache && state.state === RequestState.IDLE) {
+          // Construct initial payload from what we have in Redux
+      }
+
+      // If we don't have data yet, start loading
+      if (state.state !== RequestState.SUCCESS) {
+         dispatch({ type: "FETCH_DATA_START" });
+      }
+
       const balances = await fetchBalances(
         publicKey,
         isMainnetNetwork,
@@ -82,8 +94,7 @@ export function useGetAssetDomainsWithBalances(getBalancesOptions: {
       }
       const domainsToFetch = [] as string[];
       const domains = [] as ManageAssetCurrency[];
-      // TODO: cache home domain when getting asset icon
-      // https://github.com/stellar/freighter/issues/410
+      
       for (let i = 0; i < balances.balances.length; i += 1) {
         const balance = balances.balances[i];
         if ("liquidityPoolId" in balance && balance.liquidityPoolId) {
@@ -91,30 +102,20 @@ export function useGetAssetDomainsWithBalances(getBalancesOptions: {
         }
 
         const { token, contractId, blockaidData } = balance as Balance;
-
         const code = token.code || "";
-        let issuer = {
-          key: "",
-        };
+        let issuer = { key: "" };
 
         if ("issuer" in token) {
           issuer = token.issuer;
         }
 
-        // If we are in the swap flow and the asset has decimals (is a token), we skip it if Soroswap is not enabled
-        if (
-          "decimals" in balances.balances[i] &&
-          isSwap &&
-          !isSoroswapEnabled
-        ) {
+        if ("decimals" in balances.balances[i] && isSwap && !isSoroswapEnabled) {
           continue;
         }
 
         if (code !== "XLM") {
           let domain = "";
-
-          const cachedHomeDomain =
-            homeDomains[networkDetails.network]?.[issuer.key];
+          const cachedHomeDomain = homeDomains[networkDetails.network]?.[issuer.key];
           if (useCache && cachedHomeDomain) {
             domain = cachedHomeDomain;
           } else if (cachedHomeDomain !== null) {
@@ -132,7 +133,6 @@ export function useGetAssetDomainsWithBalances(getBalancesOptions: {
             contract: contractId,
             isSuspicious: isAssetSuspicious(blockaidData),
           });
-          // include native asset for asset dropdown selection
         } else if (!isManagingAssets) {
           domains.push({
             code,
@@ -146,26 +146,10 @@ export function useGetAssetDomainsWithBalances(getBalancesOptions: {
 
       if (isSoroswapEnabled && isSwap && !assetSelect.isSource) {
         soroswapTokens.forEach((token) => {
-          const nativeContractDetails =
-            getNativeContractDetails(networkDetails);
-
-          // if we have a balance for a token, it will have been handled above.
-          // This is designed to populate tokens available from Soroswap that the user does not already have
-          if (
-            balances &&
-            !findAssetBalance(balances.balances, {
-              code: token.code,
-              issuer: token.contract,
-            }) &&
-            token.contract !== nativeContractDetails.contract
-          ) {
-            domains.push({
-              code: token.code,
-              issuer: token.contract,
-              image: token.icon,
-              domain: "",
-              icon: token.icon,
-            });
+          const nativeContractDetails = getNativeContractDetails(networkDetails);
+          if (balances && !findAssetBalance(balances.balances, { code: token.code, issuer: token.contract }) &&
+            token.contract !== nativeContractDetails.contract) {
+            domains.push({ code: token.code, issuer: token.contract, image: token.icon, domain: "", icon: token.icon });
           }
         });
       }
@@ -182,21 +166,13 @@ export function useGetAssetDomainsWithBalances(getBalancesOptions: {
 
       if (Object.keys(fetchedDomains).length > 0) {
         domains.forEach((domainObj) => {
-          const domainToAdd = {
-            ...domainObj,
-          };
+          const domainToAdd = { ...domainObj };
           if (!domainObj.domain) {
             domainToAdd.domain = fetchedDomains[domainObj.issuer || ""] || null;
             if (domainObj.issuer) {
-              reduxDispatch(
-                saveDomainForIssuer({
-                  networkDetails,
-                  homeDomains: { [domainObj.issuer]: domainToAdd.domain },
-                }),
-              );
+              reduxDispatch(saveDomainForIssuer({ networkDetails, homeDomains: { [domainObj.issuer]: domainToAdd.domain } }));
             }
           }
-
           backfilledDomains.push(domainToAdd);
         });
       } else {
@@ -215,7 +191,9 @@ export function useGetAssetDomainsWithBalances(getBalancesOptions: {
       dispatch({ type: "FETCH_DATA_SUCCESS", payload });
       return payload;
     } catch (error) {
-      dispatch({ type: "FETCH_DATA_ERROR", payload: error });
+      if (state.state !== "SUCCESS") {
+        dispatch({ type: "FETCH_DATA_ERROR", payload: error });
+      }
       throw new Error(`Failed to fetch domains - ${error}`);
     }
   };

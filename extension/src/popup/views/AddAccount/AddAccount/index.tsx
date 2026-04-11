@@ -102,7 +102,7 @@ export const AddAccount = () => {
   // Ask for user password in case it's not saved in current session store
   return (
     <React.Fragment>
-      <SubviewHeader title="" />
+      <SubviewHeader title={t("Add New Address")} />
 
       <EnterPassword
         accountAddress={data.account.publicKey}

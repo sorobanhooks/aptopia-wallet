@@ -38,6 +38,7 @@ import { AppState } from "popup/App";
 import { METRICS_DATA } from "constants/localStorageTypes";
 import { MetricsData } from "helpers/metrics";
 import i18n from "popup/helpers/localizationConfig";
+import { wallet as sdkWallet } from "@shared/helpers/stellar";
 
 export const createAccount = createAsyncThunk<
   { allAccounts: Account[]; publicKey: string; hasPrivateKey: boolean },
@@ -67,11 +68,14 @@ export const createAccount = createAsyncThunk<
 
 export const fundAccount = createAsyncThunk(
   "auth/fundAccount",
-  async ({ publicKey }: { publicKey: string }, { getState }) => {
+  async (
+    { publicKey, friendbotUrl }: { publicKey: string; friendbotUrl?: string },
+    { getState },
+  ) => {
     const activePublicKey = publicKeySelector(getState() as AppState);
 
     try {
-      await fundAccountService({ activePublicKey, publicKey });
+      await fundAccountService({ activePublicKey, publicKey, friendbotUrl });
     } catch (e) {
       const message = e instanceof Error ? e.message : JSON.stringify(e);
       console.error("Failed when funding an account: ", message);
@@ -83,9 +87,7 @@ export const addAccount = createAsyncThunk<
   { publicKey: string; allAccounts: Account[]; hasPrivateKey: boolean },
   { password: string },
   { rejectValue: ErrorMessage }
->("auth/addAccount", async ({ password }, { getState, rejectWithValue }) => {
-  const activePublicKey = publicKeySelector(getState() as AppState);
-
+>("auth/addAccount", async ({ password }, { rejectWithValue }) => {
   let res = {
     publicKey: "",
     allAccounts: [] as Account[],
@@ -93,7 +95,7 @@ export const addAccount = createAsyncThunk<
   };
 
   try {
-    res = await addAccountService({ activePublicKey, password });
+    res = await addAccountService({ password });
   } catch (e) {
     const message = e instanceof Error ? e.message : JSON.stringify(e);
     console.error("Failed when creating an account: ", message);
@@ -106,11 +108,11 @@ export const addAccount = createAsyncThunk<
 
 export const importAccount = createAsyncThunk<
   { publicKey: string; allAccounts: Account[]; hasPrivateKey: boolean },
-  { password: string; privateKey: string },
+  { password: string; privateKey: string; mnemonicPhrase?: string },
   { rejectValue: ErrorMessage }
 >(
   "auth/importAccount",
-  async ({ password, privateKey }, { getState, rejectWithValue }) => {
+  async ({ password, privateKey, mnemonicPhrase }, { getState, rejectWithValue }) => {
     let res = {
       publicKey: "",
       allAccounts: [] as Account[],
@@ -123,6 +125,7 @@ export const importAccount = createAsyncThunk<
         activePublicKey,
         password,
         privateKey,
+        mnemonicPhrase,
       });
     } catch (e) {
       console.error("Failed when importing an account: ", e);
@@ -451,6 +454,9 @@ export const addTokenId = createAsyncThunk<
     const activePublicKey = publicKeySelector(getState());
 
     try {
+      // Use SDK to validate and fetch Soroban token metadata
+      await sdkWallet.addSorobanToken(tokenId);
+
       res = await addTokenIdService({
         activePublicKey,
         publicKey,
@@ -544,6 +550,7 @@ interface InitialState {
   error: string;
   accountStatus: ActionStatus;
   isAccountMismatch: boolean;
+  agentAddress: string;
 }
 
 const initialState: InitialState = {
@@ -558,6 +565,7 @@ const initialState: InitialState = {
   error: "",
   accountStatus: ActionStatus.IDLE,
   isAccountMismatch: false,
+  agentAddress: "",
 };
 
 const authSlice = createSlice({
@@ -572,6 +580,9 @@ const authSlice = createSlice({
     },
     setConnectingWalletType(state, action) {
       state.connectingWalletType = action.payload;
+    },
+    setAgentAddress(state, action) {
+      state.agentAddress = action.payload;
     },
     saveAccount(state, action) {
       const {
@@ -970,6 +981,10 @@ export const isAccountMismatchSelector = createSelector(
   authSelector,
   (auth: InitialState) => auth.isAccountMismatch,
 );
+export const agentAddressSelector = createSelector(
+  authSelector,
+  (auth: InitialState) => auth.agentAddress || "",
+);
 
 export const accountSelector = createSelector(
   authSelector,
@@ -990,6 +1005,7 @@ export const {
   saveAccount,
   saveAccountError,
   saveApplicationState,
+  setAgentAddress,
 } = authSlice.actions;
 
 export { reducer };

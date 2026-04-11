@@ -21,34 +21,17 @@ jest.mock("background/helpers/account", () => ({
   }),
 }));
 
-jest.mock("@shared/helpers/stellar", () => {
-  const signResult = Buffer.from("signed-entry");
-  return {
-    getSdk: jest.fn().mockReturnValue({
-      Keypair: {
-        fromSecret: () => ({
-          publicKey: () =>
-            "GBTYAFHGNZSTE4VBWZYAGB3SRGJEPTI5I4Y22KZ4JTVAN56LESB6JZOF",
-          sign: jest.fn().mockReturnValue(signResult),
-        }),
-      },
-      hash: jest.fn().mockReturnValue(Buffer.from("hashed")),
-    }),
-  };
-});
+jest.mock("@shared/helpers/stellar", () => ({
+  wallet: {
+    setNetworkConfig: jest.fn(),
+    selectAccount: jest.fn(),
+    signAuthEntry: jest.fn().mockReturnValue("signed-entry-base64"),
+  },
+}));
 
 jest.mock("@sentry/browser", () => ({
   captureException: jest.fn(),
 }));
-
-const mockLocalStore = {
-  getItem: jest.fn().mockResolvedValue("mock-key-id"),
-  setItem: jest.fn(),
-  remove: jest.fn(),
-  clear: jest.fn(),
-} as any;
-
-const mockSessionStore = {} as any;
 
 const makeAuthEntryData = (uuid: string) => ({
   authEntry: {
@@ -96,8 +79,6 @@ describe("signAuthEntry handler", () => {
 
     await signAuthEntry({
       request,
-      localStore: mockLocalStore,
-      sessionStore: mockSessionStore,
       authEntryQueue,
       responseQueue,
     });
@@ -123,8 +104,6 @@ describe("signAuthEntry handler", () => {
 
     await signAuthEntry({
       request,
-      localStore: mockLocalStore,
-      sessionStore: mockSessionStore,
       authEntryQueue,
       responseQueue,
     });
@@ -149,8 +128,6 @@ describe("signAuthEntry handler", () => {
 
     const result = await signAuthEntry({
       request,
-      localStore: mockLocalStore,
-      sessionStore: mockSessionStore,
       authEntryQueue,
       responseQueue,
     });
@@ -179,8 +156,6 @@ describe("signAuthEntry handler", () => {
 
     await signAuthEntry({
       request,
-      localStore: mockLocalStore,
-      sessionStore: mockSessionStore,
       authEntryQueue,
       responseQueue,
     });
@@ -202,8 +177,6 @@ describe("signAuthEntry handler", () => {
 
     const result = await signAuthEntry({
       request,
-      localStore: mockLocalStore,
-      sessionStore: mockSessionStore,
       authEntryQueue,
       responseQueue,
     });

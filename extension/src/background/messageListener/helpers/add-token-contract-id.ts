@@ -4,6 +4,7 @@ import {
 } from "background/helpers/account";
 import { DataStorageAccess } from "background/helpers/dataStorageAccess";
 import { KEY_ID, TOKEN_ID_LIST } from "constants/localStorageTypes";
+import { wallet as sdkWallet } from "@shared/helpers/stellar";
 
 interface Args {
   contractId: string;
@@ -30,6 +31,9 @@ export const addTokenWithContractId = async ({
   }
 
   try {
+    // Fetch and validate token metadata before proceeding
+    await sdkWallet.addSorobanToken(tokenId);
+
     await subscribeTokenBalance({ publicKey, contractId: tokenId, network });
     await subscribeTokenHistory({ publicKey, contractId: tokenId, network });
 

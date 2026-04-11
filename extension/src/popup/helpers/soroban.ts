@@ -249,6 +249,9 @@ export const getAssetDecimals = (
   if (isToken) {
     const _balances = balances.balances;
     const canonical = getAssetFromCanonical(asset);
+    if (!canonical) {
+      return CLASSIC_ASSET_DECIMALS;
+    }
     const balance = findAssetBalance(_balances, canonical);
 
     if (balance && "decimals" in balance) {
@@ -275,6 +278,9 @@ export const getAvailableBalance = ({
   recommendedFee: string;
 }) => {
   const selectedCanonical = getAssetFromCanonical(assetCanonical);
+  if (!selectedCanonical) {
+    return "0";
+  }
   const selectedBalance = findAssetBalance(balances, selectedCanonical);
   if (selectedBalance) {
     if (isSorobanBalance(selectedBalance)) {
@@ -353,6 +359,9 @@ export const parseTokenAmount = (value: string, decimals: number) => {
 };
 
 export const addressToString = (address: xdr.ScAddress) => {
+  if (!address || typeof address.switch !== "function") {
+    return "";
+  }
   if (address.switch().name === "scAddressTypeAccount") {
     return StrKey.encodeEd25519PublicKey(address.accountId().ed25519());
   }
@@ -368,6 +377,9 @@ export const getArgsForTokenInvocation = (
   let amount: bigint | number | undefined;
   let from = "";
   let to = "";
+  if (!args || args.length < 3 || typeof args[2]?.switch !== "function") {
+    return { from, to, amount: BigInt(0) };
+  }
   const thirdArgType = args[2].switch();
 
   switch (fnName) {
@@ -470,10 +482,16 @@ export interface InvocationTree {
 }
 
 export function buildInvocationTree(root: xdr.SorobanAuthorizedInvocation) {
+  if (!root || typeof root.function !== "function") {
+    return { type: "unknown", args: {}, invocations: [] } as InvocationTree;
+  }
   const fn = root.function();
   const output = {} as InvocationTree;
   const inner = fn.value();
 
+  if (typeof fn?.switch !== "function") {
+    return { type: "unknown", args: {}, invocations: [] } as InvocationTree;
+  }
   switch (fn.switch().value) {
     // sorobanAuthorizedFunctionTypeContractFn
     case 0: {
@@ -508,12 +526,20 @@ export function buildInvocationTree(root: xdr.SorobanAuthorizedInvocation) {
         _inner.executable(),
         _inner.contractIdPreimage(),
       ];
-      if (!!exec.switch().value !== !!preimage.switch().value) {
+      if (
+        typeof exec?.switch === "function" &&
+        typeof preimage?.switch === "function" &&
+        !!exec.switch().value !== !!preimage.switch().value
+      ) {
         throw new Error(
           `creation function appears invalid: ${JSON.stringify(
             inner,
           )} (should be wasm+address or token+asset)`,
         );
+      }
+
+      if (typeof exec?.switch !== "function") {
+        throw new Error(`creation function executable is invalid: ${JSON.stringify(exec)}`);
       }
 
       switch (exec.switch().value) {
@@ -529,7 +555,7 @@ export function buildInvocationTree(root: xdr.SorobanAuthorizedInvocation) {
             address: Address.fromScAddress(details.address()).toString(),
           };
           // create contract V2
-          if (fn.switch().value === 2) {
+          if (typeof fn?.switch === "function" && fn.switch().value === 2) {
             const v2Args = _inner as xdr.CreateContractArgsV2;
             output.args.constructorArgs = v2Args.constructorArgs();
           }
@@ -543,7 +569,7 @@ export function buildInvocationTree(root: xdr.SorobanAuthorizedInvocation) {
             preimage.fromAsset(),
           ).toString();
           // create contract V2
-          if (fn.switch().value === 2) {
+          if (typeof fn?.switch === "function" && fn.switch().value === 2) {
             const v2Args = _inner as xdr.CreateContractArgsV2;
             output.args.constructorArgs = v2Args.constructorArgs();
           }
@@ -558,7 +584,7 @@ export function buildInvocationTree(root: xdr.SorobanAuthorizedInvocation) {
 
     default:
       throw new Error(
-        `unknown invocation type (${fn.switch()}): ${JSON.stringify(fn)}`,
+        `unknown invocation type (${typeof fn?.switch === "function" ? fn.switch() : "unknown"}): ${JSON.stringify(fn)}`,
       );
   }
 
@@ -567,11 +593,17 @@ export function buildInvocationTree(root: xdr.SorobanAuthorizedInvocation) {
 }
 
 export const scValByType = (scVal: xdr.ScVal) => {
+  if (!scVal || typeof scVal.switch !== "function") {
+    return null;
+  }
   switch (scVal.switch()) {
     case xdr.ScValType.scvAddress(): {
       const address = scVal.address();
+      if (!address || typeof address.switch !== "function") {
+        return null;
+      }
       const addressType = address.switch();
-      if (addressType.name === "scAddressTypeAccount") {
+      if (addressType?.name === "scAddressTypeAccount") {
         return StrKey.encodeEd25519PublicKey(address.accountId().ed25519());
       }
       return addressToString(address);
@@ -614,7 +646,7 @@ export const scValByType = (scVal: xdr.ScVal) => {
 
     case xdr.ScValType.scvLedgerKeyNonce():
     case xdr.ScValType.scvLedgerKeyContractInstance(): {
-      if (scVal.switch().name === "scvLedgerKeyNonce") {
+      if (typeof scVal.switch === "function" && scVal.switch().name === "scvLedgerKeyNonce") {
         const val = scVal.nonceKey().nonce();
         return val.toString();
       }
@@ -695,8 +727,14 @@ const isInvocationArg = (
 export function getInvocationArgs(
   invocation: xdr.SorobanAuthorizedInvocation,
 ): InvocationArgs | undefined {
+  if (!invocation || typeof invocation.function !== "function") {
+    return undefined;
+  }
   const fn = invocation.function();
 
+  if (!fn || typeof fn.switch !== "function") {
+    return undefined;
+  }
   switch (fn.switch().value) {
     // sorobanAuthorizedFunctionTypeContractFn
     case 0: {
@@ -712,7 +750,7 @@ export function getInvocationArgs(
     case 2:
     case 1: {
       const _invocation =
-        fn.switch().value === 2
+        typeof fn.switch === "function" && fn.switch().value === 2
           ? fn.createContractV2HostFn()
           : fn.createContractHostFn();
       const [exec, preimage] = [
@@ -720,6 +758,9 @@ export function getInvocationArgs(
         _invocation.contractIdPreimage(),
       ];
 
+      if (!exec || typeof exec.switch !== "function") {
+        return undefined;
+      }
       switch (exec.switch().value) {
         // contractExecutableWasm
         case 0: {
@@ -732,7 +773,7 @@ export function getInvocationArgs(
             address: Address.fromScAddress(details.address()).toString(),
           } as FnArgsCreateWasm;
 
-          if (fn.switch().value === 2) {
+          if (typeof fn.switch === "function" && fn.switch().value === 2) {
             contractDetails.args = (
               _invocation as xdr.CreateContractArgsV2
             ).constructorArgs();
@@ -748,7 +789,7 @@ export function getInvocationArgs(
             asset: Asset.fromOperation(preimage.fromAsset()).toString(),
           } as FnArgsCreateSac;
 
-          if (fn.switch().value === 2) {
+          if (typeof fn.switch === "function" && fn.switch().value === 2) {
             sacDetails.args = (
               _invocation as xdr.CreateContractArgsV2
             ).constructorArgs();
@@ -769,7 +810,11 @@ export function getInvocationArgs(
 }
 
 export const getCreateContractArgs = (hostFn: xdr.HostFunction) => {
+  if (!hostFn || typeof hostFn.switch !== "function") {
+    return { contractIdPreimage: null, executable: null };
+  }
   if (
+    typeof hostFn.switch === "function" &&
     hostFn.switch() !== xdr.HostFunctionType.hostFunctionTypeCreateContractV2()
   ) {
     const args = hostFn.createContract();

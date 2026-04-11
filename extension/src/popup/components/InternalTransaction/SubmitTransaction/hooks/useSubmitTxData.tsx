@@ -93,7 +93,7 @@ function useSubmitTxData({
           );
         }
         emitMetric(METRIC_NAMES.sendPaymentSuccess, {
-          sourceAsset: sourceAsset.code,
+          sourceAsset: sourceAsset?.code,
         });
 
         // After successful submission, re-fetch balances and collectibles to get their latest values

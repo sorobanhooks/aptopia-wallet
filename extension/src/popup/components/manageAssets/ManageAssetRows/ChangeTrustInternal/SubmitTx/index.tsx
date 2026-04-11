@@ -22,8 +22,10 @@ import {
 import { settingsNetworkDetailsSelector } from "popup/ducks/settings";
 import { getStellarExpertUrl } from "popup/helpers/account";
 import { openTab } from "popup/helpers/navigate";
-import { getManageAssetXDR } from "popup/helpers/getManageAssetXDR";
-import { stellarSdkServer } from "@shared/api/helpers/stellarSdkServer";
+import {
+  buildTrustlineTransaction as internalBuildTrustlineTransaction,
+} from "@shared/api/internal";
+
 import { AssetIcons } from "@shared/api/types";
 import { removeTokenId, startHwSign } from "popup/ducks/transactionSubmission";
 import { NETWORKS } from "@shared/constants/stellar";
@@ -54,7 +56,7 @@ export const SubmitTransaction = ({
   asset,
   addTrustline,
   icons,
-  fee,
+  //fee,
   goBack,
   onSuccess,
 }: SubmitTransactionProps) => {
@@ -105,18 +107,12 @@ export const SubmitTransaction = ({
         }
       } else {
         // Classic asset or SAC - submit trustline transaction
-        const server = stellarSdkServer(
-          networkDetails.networkUrl,
-          networkDetails.networkPassphrase,
-        );
-        const xdr = await getManageAssetXDR({
-          publicKey,
+        const xdr = await internalBuildTrustlineTransaction({
+          activePublicKey: publicKey,
           assetCode: asset.code,
           assetIssuer: asset.issuer,
-          addTrustline,
-          server,
-          recommendedFee: fee,
           networkDetails,
+          limit: addTrustline ? undefined : "0",
         });
 
         if (isHardwareWallet) {
@@ -282,6 +278,11 @@ export const SubmitTransaction = ({
                     ? `Add ${asset.code} trustline`
                     : `Remove ${asset.code} trustline`}
                 </span>
+                {isFail && (state.error as any)?.error && (
+                  <div className="SubmitTransaction__Summary__Error">
+                    {(state.error as any).error}
+                  </div>
+                )}
               </div>
             </div>
           </div>

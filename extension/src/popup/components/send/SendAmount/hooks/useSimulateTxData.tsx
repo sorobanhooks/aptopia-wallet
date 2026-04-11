@@ -24,6 +24,10 @@ import {
 } from "helpers/stellar";
 import { computeDestMinWithSlippage } from "helpers/transaction";
 import { stellarSdkServer } from "@shared/api/helpers/stellarSdkServer";
+import {
+  buildPaymentTransaction,
+  simulateTokenTransfer,
+} from "@shared/api/internal";
 import { getBaseAccount } from "popup/helpers/account";
 import { AccountBalances, useGetBalances } from "helpers/hooks/useGetBalances";
 import {
@@ -32,7 +36,6 @@ import {
   isContractId,
   parseTokenAmount,
 } from "popup/helpers/soroban";
-import { simulateTokenTransfer } from "@shared/api/internal";
 import { BlockAidScanTxResult } from "@shared/api/types";
 import { getAssetSacAddress } from "@shared/helpers/soroban/token";
 import {
@@ -365,7 +368,7 @@ function getAssetAddress(
   }
   if (
     isContractId(destination) &&
-    !isContractId(getAssetFromCanonical(asset).issuer)
+    !isContractId(getAssetFromCanonical(asset)?.issuer || "")
   ) {
     return getAssetSacAddress(
       asset,
@@ -430,6 +433,10 @@ function useSimulateTxData({
         currentTransactionData.destinationAsset || "native",
       );
 
+      if (!freshSourceAsset || !freshDestAsset) {
+        throw new Error("Invalid asset. Please try again.");
+      }
+
       // Compute asset address using current asset to ensure consistency
       const currentAssetAddress = getAssetAddress(
         currentAsset,
@@ -468,9 +475,11 @@ function useSimulateTxData({
         true,
       );
 
-      if (isError<AccountBalances>(balancesResult)) {
-        throw new Error(balancesResult.message);
+      // Check for error in the payload
+      if (balancesResult.error) {
+        throw new Error(balancesResult.error);
       }
+
 
       const assetBalance = findAddressBalance(
         balancesResult.balances,
@@ -561,26 +570,49 @@ function useSimulateTxData({
         // Use currentTransactionFee (fresh from Redux) instead of simResponse.recommendedFee
         // For classic transactions, simResponse.recommendedFee is just the recommendedFee we passed in
         const feeToUse = currentTransactionFee || simResponse.recommendedFee;
-        const transaction = await getBuiltTx(
-          publicKey,
-          {
-            sourceAsset: freshSourceAsset,
-            destAsset: freshDestAsset,
+        let xdr: string;
+        if (isPathPayment || isSwap) {
+          const transaction = await getBuiltTx(
+            publicKey,
+            {
+              sourceAsset: freshSourceAsset,
+              destAsset: freshDestAsset,
+              amount: cleanAmount(currentAmount),
+              destinationAmount,
+              destination,
+              allowedSlippage,
+              path,
+              isPathPayment,
+              isSwap,
+              isFunded: destBalancesResult.isFunded!,
+            },
+            feeToUse,
+            transactionTimeout,
+            networkDetails,
+            memoToUse,
+          );
+          xdr = transaction.build().toXDR();
+        } else {
+          // Standard payment using SDK
+          const isNative =
+            typeof (freshSourceAsset as Asset).isNative === "function"
+              ? (freshSourceAsset as Asset).isNative()
+              : freshSourceAsset.code === "XLM" && !("issuer" in freshSourceAsset);
+
+          xdr = await buildPaymentTransaction({
+            activePublicKey: publicKey,
+            destination: destination,
+            assetCode: freshSourceAsset.code as string,
+            assetIssuer: isNative
+              ? ""
+              : ("issuer" in freshSourceAsset
+                  ? (freshSourceAsset.issuer as string)
+                  : ""),
             amount: cleanAmount(currentAmount),
-            destinationAmount,
-            destination,
-            allowedSlippage,
-            path,
-            isPathPayment,
-            isSwap,
-            isFunded: destBalancesResult.isFunded!,
-          },
-          feeToUse,
-          transactionTimeout,
-          networkDetails,
-          memoToUse,
-        );
-        const xdr = transaction.build().toXDR();
+            memo: memoToUse ? memoToUse.trim() : undefined,
+          });
+        }
+        
         payload.transactionXdr = xdr;
         payload.scanResult = applyExpectedToFailReason({
           scanResult: await scanTx(xdr, scanUrlstub, networkDetails),
@@ -603,6 +635,7 @@ function useSimulateTxData({
       dispatch({ type: "FETCH_DATA_SUCCESS", payload });
       return payload;
     } catch (error) {
+      console.error("Simulation failed:", error);
       dispatch({
         type: "FETCH_DATA_ERROR",
         payload:
@@ -610,6 +643,7 @@ function useSimulateTxData({
       });
       return error;
     }
+
   };
 
   return {

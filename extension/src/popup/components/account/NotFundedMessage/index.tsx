@@ -15,23 +15,36 @@ import { isMainnet } from "helpers/stellar";
 
 import "./styles.scss";
 
-export const NotFundedMessage = ({
-  canUseFriendbot,
-  publicKey,
-  reloadBalances,
-}: {
-  canUseFriendbot: boolean;
+export interface NotFundedMessageProps {
+  canUseFriendbot?: boolean;
+  friendbotUrl?: string;
   publicKey: string;
   reloadBalances: () => Promise<unknown>;
-}) => {
+}
+
+export const NotFundedMessage = ({
+  publicKey,
+  canUseFriendbot,
+  friendbotUrl,
+  reloadBalances,
+}: NotFundedMessageProps) => {
   const { t } = useTranslation();
   const dispatch = useDispatch<AppDispatch>();
   const navigate = useNavigate();
   const networkDetails = useSelector(settingsNetworkDetailsSelector);
 
   const handleFundAccount = async () => {
-    await dispatch(fundAccount({ publicKey }));
-    await reloadBalances();
+    await dispatch(fundAccount({ publicKey, friendbotUrl }));
+    // Wait for Horizon to catch up by polling
+    let attempts = 0;
+    while (attempts < 10) {
+      await new Promise((resolve) => setTimeout(resolve, 2000));
+      const res = await reloadBalances() as any;
+      if (res?.balances?.isFunded) {
+        break;
+      }
+      attempts++;
+    }
   };
 
   return (

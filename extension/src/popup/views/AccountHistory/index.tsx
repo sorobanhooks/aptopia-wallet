@@ -2,17 +2,15 @@ import React, { useEffect, useState } from "react";
 import { Navigate, useLocation } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { useSelector } from "react-redux";
-import { Text } from "@stellar/design-system";
+import { Loader, Text } from "@stellar/design-system";
 
 import {
   settingsNetworkDetailsSelector,
-  settingsSelector,
 } from "popup/ducks/settings";
 import { getMonthLabel } from "popup/helpers/getMonthLabel";
 
 import { HistoryItem } from "popup/components/accountHistory/HistoryItem";
 import { TransactionDetail } from "popup/components/accountHistory/TransactionDetail";
-import { Loading } from "popup/components/Loading";
 import { View } from "popup/basics/layout/View";
 import { RequestState } from "constants/request";
 import { AppDataType } from "helpers/hooks/useGetAppData";
@@ -28,16 +26,10 @@ export const AccountHistory = () => {
   const { t } = useTranslation();
   const location = useLocation();
   const networkDetails = useSelector(settingsNetworkDetailsSelector);
-  const { isHideDustEnabled } = useSelector(settingsSelector);
-  const { state: historyState, fetchData } = useGetHistoryData(
-    {
-      showHidden: false,
-      includeIcons: true,
-    },
-    {
-      isHideDustEnabled,
-    },
-  );
+  const { state: historyState, fetchData } = useGetHistoryData({
+    showHidden: false,
+    includeIcons: true,
+  });
 
   const [activeHistoryDetail, setActiveHistoryDetailId] = useState<
     string | null
@@ -51,15 +43,9 @@ export const AccountHistory = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const isLoaderShowing =
-    historyState.state === RequestState.IDLE ||
-    historyState.state === RequestState.LOADING;
-
-  if (isLoaderShowing) {
-    return <Loading />;
-  }
-
   const hasError = historyState.state === RequestState.ERROR;
+  const isResolved = historyState.data?.type === AppDataType.RESOLVED;
+
   if (historyState.data?.type === AppDataType.REROUTE) {
     if (historyState.data.shouldOpenTab) {
       openTab(newTabHref(historyState.data.routeTarget));
@@ -74,23 +60,25 @@ export const AccountHistory = () => {
     );
   }
 
-  if (!hasError) {
+  if (isResolved && !hasError) {
     reRouteOnboarding({
-      type: historyState.data.type,
-      applicationState: historyState.data.applicationState,
+      type: historyState.data!.type,
+      applicationState: historyState.data!.applicationState,
       state: historyState.state,
     });
   }
 
-  const balances = historyState.data?.balances!;
-  const publicKey = historyState.data?.publicKey!;
+  const balances = isResolved ? historyState.data!.balances : undefined;
+  const publicKey = isResolved ? historyState.data!.publicKey : undefined;
+  const historySections = isResolved ? historyState.data!.history : [];
+
   const activeOperation =
-    activeHistoryDetail && !hasError
-      ? historyState.data.history
+    activeHistoryDetail && !hasError && isResolved
+      ? historyState.data!.history
           .flat()
-          .map((section) => section.operations)
+          .map((section: any) => section.operations)
           .flat()
-          .find((op) => op.id === activeHistoryDetail)
+          .find((op: any) => op.id === activeHistoryDetail)
       : undefined;
 
   return (
@@ -99,7 +87,7 @@ export const AccountHistory = () => {
       <View.Content hasNoTopPadding hasNoBottomPadding>
         <div className="AccountHistory" data-testid="AccountHistory">
           {!hasError &&
-            historyState.data.history.map((section) => (
+            historySections.map((section: any) => (
               <div key={section.monthYear} className="AccountHistory__list">
                 <Text
                   as="div"
@@ -110,12 +98,12 @@ export const AccountHistory = () => {
                 </Text>
 
                 <div className="AccountHistory__list">
-                  {section.operations.map((operation) => (
+                  {section.operations.map((operation: any) => (
                     <HistoryItem
                       key={operation.id}
-                      accountBalances={balances}
+                      accountBalances={balances!}
                       operation={operation}
-                      publicKey={publicKey}
+                      publicKey={publicKey!}
                       networkDetails={networkDetails}
                       setActiveHistoryDetailId={setActiveHistoryDetailId}
                     />
@@ -123,9 +111,25 @@ export const AccountHistory = () => {
                 </div>
               </div>
             ))}
-          {hasError || historyState.data.history.length < 1 ? (
-            <div>{t("No transactions to show")}</div>
+          {hasError || (isResolved && historySections.length < 1) ? (
+            <div style={{ padding: "1rem", textAlign: "center", color: "var(--sds-clr-gray-12)" }}>
+              {hasError ? t("Error loading history") : t("No transactions to show")}
+            </div>
           ) : null}
+          {!isResolved && !hasError && (
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "center",
+                alignItems: "center",
+                flex: "1 0 auto",
+                height: "100%",
+                padding: "2rem",
+              }}
+            >
+              <Loader size="3rem" />
+            </div>
+          )}
         </div>
       </View.Content>
       <SlideupModal

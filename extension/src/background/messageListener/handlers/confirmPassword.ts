@@ -1,6 +1,4 @@
 import { Store } from "redux";
-import { KeyManager } from "@stellar/typescript-wallet-sdk-km";
-
 import { ConfirmPasswordMessage } from "@shared/api/types/message-request";
 import {
   addAccountName,
@@ -32,14 +30,25 @@ export const confirmPassword = async ({
   request: ConfirmPasswordMessage;
   localStore: DataStorageAccess;
   sessionStore: Store;
-  keyManager: KeyManager;
+  keyManager: any;
   sessionTimer: SessionTimer;
 }) => {
-  /* In Popup, we call loadAccount to figure out what the state the user is in,
-  then redirect them to <UnlockAccount /> if there's any missing data (public/private key, allAccounts, etc.)
-  <UnlockAccount /> calls this method to fill in any missing data */
-
   const { password } = request;
+
+  // ── Session Unlocking ──────────────────────────────────────────
+  // loginToAllAccounts now handles both SDK restoration and legacy state sync.
+  try {
+    await loginToAllAccounts(
+      password,
+      localStore,
+      sessionStore,
+      keyManager,
+      sessionTimer,
+    );
+  } catch (e) {
+    return { error: "Incorrect password" };
+  }
+
   const keyIdList = await getKeyIdList({ localStore });
 
   /* migration needed to v1.0.6-beta data model */
@@ -53,18 +62,6 @@ export const confirmPassword = async ({
     }
   }
   /* end migration script */
-
-  try {
-    await loginToAllAccounts(
-      password,
-      localStore,
-      sessionStore,
-      keyManager,
-      sessionTimer,
-    );
-  } catch (e) {
-    return { error: "Incorrect password" };
-  }
 
   const hasPrivateKeySelector = buildHasPrivateKeySelector(localStore);
   return {

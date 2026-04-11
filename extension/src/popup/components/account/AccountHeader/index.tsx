@@ -118,6 +118,17 @@ export const AccountHeader = ({
                   }
                 >
                   <>
+                    <div
+                      className="AccountHeader__options__item"
+                      onClick={() => navigateTo(ROUTES.dashboard, navigate)}
+                    >
+                      <Text as="div" size="sm" weight="medium">
+                        {t("Dashboard")}
+                      </Text>
+                      <div className="AccountHeader__options__item__icon">
+                        <Icon.LayoutAlt01 />
+                      </div>
+                    </div>
                     <div className="AccountHeader__options__item">
                       <CopyText textToCopy={publicKey} doneLabel={t("Copied!")}>
                         <Text as="div" size="sm" weight="medium">
@@ -192,6 +203,7 @@ export const AccountHeader = ({
                         <Icon.Expand05 />
                       </div>
                     </div>
+
 
                     <div
                       className="AccountHeader__options__item"
@@ -391,17 +403,17 @@ export const AccountHeader = ({
               <MobileAppBanner />
               {isBackgroundActive
                 ? createPortal(
-                    <LoadingBackground
-                      onClick={() => {
-                        setIsNetworkSelectorOpen(false);
-                        setIsAccountOptionsOpen(false);
-                      }}
-                      isActive={isBackgroundActive}
-                      isFullScreen
-                      isClear
-                    />,
-                    document.querySelector("#modal-root")!,
-                  )
+                  <LoadingBackground
+                    onClick={() => {
+                      setIsNetworkSelectorOpen(false);
+                      setIsAccountOptionsOpen(false);
+                    }}
+                    isActive={isBackgroundActive}
+                    isFullScreen
+                    isClear
+                  />,
+                  document.querySelector("#modal-root")!,
+                )
                 : null}
             </div>
           </div>

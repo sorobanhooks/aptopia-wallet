@@ -15,6 +15,7 @@ import {
   removeTokenId as internalRemoveTokenId,
   submitFreighterTransaction as internalSubmitFreighterTransaction,
   submitFreighterSorobanTransaction as internalSubmitFreighterSorobanTransaction,
+  buildTrustlineTransaction as internalBuildTrustlineTransaction,
 } from "@shared/api/internal";
 
 import {
@@ -27,10 +28,10 @@ import {
 
 import { NETWORKS, NetworkDetails } from "@shared/constants/stellar";
 import { ConfigurableWalletType } from "@shared/constants/hardwareWallet";
-import { isCustomNetwork } from "@shared/helpers/stellar";
+//import { isCustomNetwork } from "@shared/helpers/stellar";
 
 import { getCanonicalFromAsset } from "helpers/stellar";
-import { INDEXER_URL } from "@shared/constants/mercury";
+//import { INDEXER_URL } from "@shared/constants/mercury";
 import { horizonGetBestPath } from "popup/helpers/horizonGetBestPath";
 import {
   soroswapGetBestPath,
@@ -98,49 +99,25 @@ export const submitFreighterTransaction = createAsyncThunk<
 >(
   "submitFreighterTransaction",
   async ({ signedXDR, networkDetails }, thunkApi) => {
-    if (isCustomNetwork(networkDetails)) {
-      try {
-        const txRes = await internalSubmitFreighterTransaction({
-          signedXDR,
-          networkDetails,
-        });
+    try {
+      const txRes = await internalSubmitFreighterTransaction({
+        signedXDR,
+        networkDetails,
+      });
 
-        return txRes;
-      } catch (e) {
-        const message = e instanceof Error ? e.message : JSON.stringify(e);
+      if ((txRes as any).error) {
         return thunkApi.rejectWithValue({
-          errorMessage: message,
-        });
+          errorMessage: (txRes as any).error,
+          response: (txRes as any).response,
+        } as ErrorMessage);
       }
-    } else {
-      try {
-        const options = {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            signed_xdr: signedXDR,
-            network_passphrase: networkDetails.networkPassphrase,
-          }),
-        };
-        const res = await fetch(`${INDEXER_URL}/submit-tx`, options);
-        const response = await res.json();
 
-        if (!res.ok) {
-          return thunkApi.rejectWithValue({
-            errorMessage: response,
-            response,
-          });
-        }
-        return response;
-      } catch (e) {
-        const message = e instanceof Error ? e.message : JSON.stringify(e);
-        return thunkApi.rejectWithValue({
-          errorMessage: message,
-          response: e as any,
-        });
-      }
+      return txRes;
+    } catch (e: any) {
+      return thunkApi.rejectWithValue({
+        errorMessage: e?.message || JSON.stringify(e),
+        response: e?.response,
+      } as ErrorMessage);
     }
   },
 );
@@ -159,52 +136,29 @@ export const submitFreighterSorobanTransaction = createAsyncThunk<
 >(
   "submitFreighterSorobanTransaction",
   async ({ signedXDR, networkDetails }, thunkApi) => {
-    if (isCustomNetwork(networkDetails)) {
-      try {
-        const txRes = await internalSubmitFreighterSorobanTransaction({
-          signedXDR,
-          networkDetails,
-        });
+    try {
+      const txRes = await internalSubmitFreighterSorobanTransaction({
+        signedXDR,
+        networkDetails,
+      });
 
-        return txRes;
-      } catch (e) {
-        const message = e instanceof Error ? e.message : JSON.stringify(e);
+      if ((txRes as any).error) {
         return thunkApi.rejectWithValue({
-          errorMessage: message,
-        });
+          errorMessage: (txRes as any).error,
+          response: (txRes as any).response,
+        } as ErrorMessage);
       }
-    } else {
-      try {
-        const options = {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            signed_xdr: signedXDR,
-            network_passphrase: networkDetails.networkPassphrase,
-          }),
-        };
-        const res = await fetch(`${INDEXER_URL}/submit-tx`, options);
-        const response = await res.json();
 
-        if (!res.ok) {
-          return thunkApi.rejectWithValue({
-            errorMessage: response,
-            response,
-          });
-        }
-        return response;
-      } catch (e) {
-        const message = e instanceof Error ? e.message : JSON.stringify(e);
-        return thunkApi.rejectWithValue({
-          errorMessage: message,
-          response: e as any,
-        });
-      }
+      return txRes;
+    } catch (e: any) {
+      return thunkApi.rejectWithValue({
+        errorMessage: e?.message || JSON.stringify(e),
+        response: e?.response,
+      } as ErrorMessage);
     }
   },
 );
+
 
 export const signWithHardwareWallet = createAsyncThunk<
   string | Buffer,
@@ -306,6 +260,57 @@ export const removeTokenId = createAsyncThunk<
     } catch (e) {
       console.error(e);
       rejectWithValue({ errorMessage: e as string });
+    }
+  },
+);
+
+export const handleRemoveTrustline = createAsyncThunk<
+  Horizon.HorizonApi.TransactionResponse,
+  {
+    assetCode: string;
+    assetIssuer: string;
+    networkDetails: NetworkDetails;
+  },
+  {
+    rejectValue: ErrorMessage;
+    state: AppState;
+  }
+>(
+  "handleRemoveTrustline",
+  async ({ assetCode, assetIssuer, networkDetails }, thunkApi) => {
+    const activePublicKey = publicKeySelector(thunkApi.getState());
+
+    try {
+      // 1. Build XDR with limit "0"
+      const xdr = await internalBuildTrustlineTransaction({
+        activePublicKey,
+        assetCode,
+        assetIssuer,
+        networkDetails,
+        limit: "0",
+      });
+
+      // 2. Sign
+      const signRes = await internalSignFreighterTransaction({
+        transactionXDR: xdr,
+        network: networkDetails.networkPassphrase,
+        activePublicKey,
+      });
+
+      // 3. Submit
+      const submitRes = await internalSubmitFreighterTransaction({
+        signedXDR: signRes.signedTransaction,
+        networkDetails,
+      });
+
+      if ((submitRes as any).error) {
+        throw new Error((submitRes as any).error);
+      }
+
+      return submitRes as Horizon.HorizonApi.TransactionResponse;
+    } catch (e) {
+      const message = e instanceof Error ? e.message : JSON.stringify(e);
+      return thunkApi.rejectWithValue({ errorMessage: message });
     }
   },
 );
@@ -461,9 +466,9 @@ interface InitialState {
   submitStatus: ActionStatus;
   hardwareWalletData: HardwareWalletData;
   response:
-    | Horizon.HorizonApi.TransactionResponse
-    | SorobanRpc.Api.SendTransactionResponse
-    | null;
+  | Horizon.HorizonApi.TransactionResponse
+  | SorobanRpc.Api.SendTransactionResponse
+  | null;
   error: ErrorMessage | undefined;
   transactionData: TransactionData;
   transactionSimulation: {

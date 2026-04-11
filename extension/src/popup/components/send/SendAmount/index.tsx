@@ -3,7 +3,7 @@ import { useDispatch, useSelector } from "react-redux";
 import { Navigate, useLocation } from "react-router-dom";
 import BigNumber from "bignumber.js";
 import { useFormik } from "formik";
-import { Button, Icon, Notification } from "@stellar/design-system";
+import { Button, Icon, Loader, Notification } from "@stellar/design-system";
 import { useTranslation } from "react-i18next";
 
 import { LoadingBackground } from "popup/basics/LoadingBackground";
@@ -40,7 +40,6 @@ import {
   saveTransactionTimeout,
   saveAmountUsd,
 } from "popup/ducks/transactionSubmission";
-import { Loading } from "popup/components/Loading";
 import { TX_SEND_MAX } from "popup/constants/transaction";
 import { getBalanceByAsset, getBalanceByKey } from "popup/helpers/balance";
 
@@ -57,7 +56,7 @@ import { AddressTile } from "popup/components/send/AddressTile";
 import { SelectedCollectible } from "popup/components/sendCollectible/SelectedCollectible";
 
 import { AppDataType } from "helpers/hooks/useGetAppData";
-import { useGetSendAmountData } from "./hooks/useSendAmountData";
+import { useGetSendAmountData, ResolvedSendAmountData } from "./hooks/useSendAmountData";
 import { SimulateTxData } from "./hooks/useSimulateTxData";
 import { InputWidthContext } from "popup/views/Send/contexts/inputWidthContext";
 import { SlideupModal } from "popup/components/SlideupModal";
@@ -165,10 +164,6 @@ export const SendAmount = ({
     [destination],
   );
 
-  // Check if contract supports muxed addresses (Soroban mux support) for all custom tokens
-  // Tokens without Soroban mux support don't support memo at all (neither G nor M addresses)
-  // Tokens with Soroban mux support allow memo for G addresses, but memo is encoded in M addresses
-  // Must be before conditional returns
   React.useEffect(() => {
     const checkContract = async () => {
       if (
@@ -229,8 +224,8 @@ export const SendAmount = ({
     React.useState<MemoEditingContext | null>(null);
 
   const handlePaymentContinue = async () => {
-    const amount = inputType === "crypto" ? formik.values.amount : priceValue!;
-    dispatch(saveAmount(cleanAmount(amount)));
+    const amountVal = inputType === "crypto" ? formik.values.amount : priceValue!;
+    dispatch(saveAmount(cleanAmount(amountVal)));
     await handleContinue();
   };
 
@@ -243,8 +238,8 @@ export const SendAmount = ({
   };
 
   const validate = (values: { amount: string }) => {
-    const amount = inputType === "crypto" ? values.amount : priceValue!;
-    const val = cleanAmount(amount);
+    const amountVal = inputType === "crypto" ? values.amount : priceValue!;
+    const val = cleanAmount(amountVal);
 
     if (val.indexOf(".") !== -1 && val.split(".")[1].length > 7) {
       return { amount: AMOUNT_ERROR.DEC_MAX };
@@ -276,9 +271,6 @@ export const SendAmount = ({
 
   const srcAsset = getAssetFromCanonical(asset);
   const parsedSourceAsset = getAssetFromCanonical(formik.values.asset);
-  const isLoading =
-    sendAmountData.state === RequestState.IDLE ||
-    sendAmountData.state === RequestState.LOADING;
 
   useEffect(() => {
     if (cryptoInputRef.current) {
@@ -311,11 +303,9 @@ export const SendAmount = ({
     return "small";
   };
 
-  if (isLoading) {
-    return <Loading />;
-  }
-
   const hasError = sendAmountData.state === RequestState.ERROR;
+  const isResolved = sendAmountData.data?.type === AppDataType.RESOLVED;
+
   if (sendAmountData.data?.type === AppDataType.REROUTE) {
     if (sendAmountData.data.shouldOpenTab) {
       openTab(newTabHref(sendAmountData.data.routeTarget));
@@ -330,30 +320,30 @@ export const SendAmount = ({
     );
   }
 
-  if (!hasError) {
+  if (!hasError && isResolved) {
     reRouteOnboarding({
-      type: sendAmountData.data.type,
-      applicationState: sendAmountData.data.applicationState,
+      type: sendAmountData.data!.type,
+      applicationState: sendAmountData.data!.applicationState,
       state: sendAmountData.state,
     });
   }
 
-  const sendData = sendAmountData.data!;
-  const assetIcon = sendData.icons[asset];
+  const sendData = isResolved ? (sendAmountData.data as ResolvedSendAmountData) : null;
+  const assetIcon = sendData?.icons[asset];
 
   // Use getBalanceByKey for tokens (contract ID), getBalanceByAsset for classic assets
   const assetBalance =
-    isToken && contractId
+    isToken && contractId && sendData
       ? getBalanceByKey(
           contractId,
           sendData.userBalances.balances,
           networkDetails,
         )
-      : getBalanceByAsset(srcAsset, sendData.userBalances.balances);
-  const prices = sendData.tokenPrices;
+      : (sendData ? getBalanceByAsset(srcAsset, sendData.userBalances.balances) : null);
+  const prices = sendData?.tokenPrices || {};
   const assetPrice = prices[asset] && prices[asset].currentPrice;
   const xlmPrice = prices["native"]?.currentPrice;
-  const assetDecimals = getAssetDecimals(asset, sendData.userBalances, isToken);
+  const assetDecimals = sendData ? getAssetDecimals(asset, sendData.userBalances, isToken) : 7;
   const priceValue = assetPrice
     ? new BigNumber(cleanAmount(formik.values.amountUsd))
         .dividedBy(new BigNumber(assetPrice))
@@ -377,17 +367,17 @@ export const SendAmount = ({
       )}`
     : null;
   const supportsUsd =
-    isMainnet(sendAmountData.data?.networkDetails!) && assetPrice;
-  const availableBalance = getAvailableBalance({
+    sendData && isMainnet(sendData.networkDetails) && assetPrice;
+  const availableBalance = sendData ? getAvailableBalance({
     assetCanonical: asset,
     balances: sendData.userBalances.balances,
     recommendedFee: fee,
-  });
+  }) : "0";
   const displayTotal =
     assetBalance && "decimals" in assetBalance
       ? availableBalance
       : formatAmount(availableBalance);
-  const srcTitle = srcAsset.code;
+  const srcTitle = srcAsset?.code || "";
   const goBackAction = () => {
     dispatch(saveAsset("native"));
     dispatch(saveIsToken(false));
@@ -463,7 +453,7 @@ export const SendAmount = ({
             {isCollectible ? (
               <Button
                 size="lg"
-                disabled={!destination || isMuxedAddressWithoutMemoSupport}
+                disabled={!destination || isMuxedAddressWithoutMemoSupport || !sendData}
                 isLoading={false}
                 data-testid="send-collectible-btn-continue"
                 isFullWidth
@@ -471,7 +461,7 @@ export const SendAmount = ({
                 variant="secondary"
                 onClick={handleContinue}
               >
-                {t("Review Send")}
+                {!sendData ? <Loader size="1.5rem" /> : t("Review Send")}
               </Button>
             ) : (
               <Button
@@ -483,7 +473,7 @@ export const SendAmount = ({
                   (inputType === "fiat" &&
                     new BigNumber(formik.values.amountUsd).isZero()) ||
                   isAmountTooHigh ||
-                  isMuxedAddressWithoutMemoSupport
+                  isMuxedAddressWithoutMemoSupport || !sendData
                 }
                 isLoading={simulationState.state === RequestState.LOADING}
                 data-testid="send-amount-btn-continue"
@@ -495,7 +485,7 @@ export const SendAmount = ({
                   formik.submitForm();
                 }}
               >
-                {t("Review Send")}
+                {!sendData ? <Loader size="1.5rem" /> : t("Review Send")}
               </Button>
             )}
           </div>
@@ -555,11 +545,11 @@ export const SendAmount = ({
                                 formatAmountPreserveCursor(
                                   e.target.value,
                                   formik.values.amount,
-                                  getAssetDecimals(
+                                  sendData ? getAssetDecimals(
                                     asset,
                                     sendData.userBalances,
                                     isToken,
-                                  ),
+                                  ) : 7,
                                   e.target.selectionStart || 1,
                                 );
                               formik.setFieldValue("amount", newAmount);
@@ -575,7 +565,7 @@ export const SendAmount = ({
                           <div
                             className={`SendAmount__amount-label SendAmount__${getAmountFontSize()}`}
                           >
-                            {parsedSourceAsset.code}
+                            {parsedSourceAsset?.code}
                           </div>
                         </>
                       )}
@@ -634,7 +624,7 @@ export const SendAmount = ({
                     <div className="SendAmount__amount-price">
                       {inputType === "crypto"
                         ? `$${priceValueUsd}`
-                        : `${priceValue} ${parsedSourceAsset.code}`}
+                        : `${priceValue} ${parsedSourceAsset?.code}`}
                       <Button
                         size="md"
                         type="button"
@@ -667,7 +657,7 @@ export const SendAmount = ({
                           {t(
                             "You don’t have enough {{asset}} in your account",
                             {
-                              asset: parsedSourceAsset.code,
+                              asset: parsedSourceAsset?.code,
                             },
                           )}
                         </span>
@@ -680,6 +670,7 @@ export const SendAmount = ({
                       type="button"
                       variant="tertiary"
                       isRounded
+                      disabled={!sendData}
                       onClick={(e) => {
                         e.preventDefault();
                         emitMetric(METRIC_NAMES.sendPaymentSetMax);
@@ -713,10 +704,10 @@ export const SendAmount = ({
                     <div className="SendAmount__EditDestAsset__title">
                       <AssetIcon
                         assetIcons={
-                          asset !== "native" ? { [asset]: assetIcon } : {}
+                          (asset !== "native" && sendData) ? { [asset]: assetIcon || "" } : {}
                         }
-                        code={srcAsset.code}
-                        issuerKey={srcAsset.issuer}
+                        code={srcAsset?.code || ""}
+                        issuerKey={srcAsset?.issuer || ""}
                         icon={assetIcon}
                         isSuspicious={false}
                       />
@@ -795,16 +786,15 @@ export const SendAmount = ({
               congestion={networkCongestion}
               onClose={() => setIsEditingSettings(false)}
               onSubmit={async ({
-                fee,
-                timeout,
+                fee: newFee,
+                timeout: newTimeout,
               }: {
                 fee: string;
                 timeout: number;
               }) => {
-                dispatch(saveTransactionFee(fee));
-                dispatch(saveTransactionTimeout(timeout));
+                dispatch(saveTransactionFee(newFee));
+                dispatch(saveTransactionTimeout(newTimeout));
                 setIsEditingSettings(false);
-                // Regenerate transaction XDR with new fee (now reads fee from Redux state inside fetchData)
                 await fetchSimulationData();
               }}
             />
@@ -819,27 +809,23 @@ export const SendAmount = ({
         setIsModalOpen={() => setIsReviewingTx(false)}
         isModalOpen={isReviewingTx}
       >
-        {isReviewingTx ? (
-          <ReviewTx
-            assetIcon={assetIcon}
-            fee={fee}
-            networkDetails={sendAmountData.data?.networkDetails!}
-            onCancel={() => setIsReviewingTx(false)}
-            onConfirm={goToNext}
-            onAddMemo={() => {
-              setIsReviewingTx(false);
-              setMemoEditingContext(MemoEditingContext.Review);
-              setIsEditingMemo(true);
-            }}
-            sendAmount={amount}
-            sendPriceUsd={priceValueUsd}
-            simulationState={simulationState}
-            srcAsset={asset}
-            title={t("You are sending")}
-          />
-        ) : (
-          <></>
-        )}
+        <ReviewTx
+          assetIcon={assetIcon || null}
+          fee={fee}
+          networkDetails={networkDetails}
+          onCancel={() => setIsReviewingTx(false)}
+          onConfirm={goToNext}
+          sendAmount={amount}
+          sendPriceUsd={priceValueUsd}
+          simulationState={simulationState}
+          srcAsset={asset}
+          title={t("You are sending")}
+          onAddMemo={() => {
+            setMemoEditingContext(MemoEditingContext.Review);
+            setIsReviewingTx(false);
+            setIsEditingMemo(true);
+          }}
+        />
       </SlideupModal>
     </React.Fragment>
   );

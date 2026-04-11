@@ -1,7 +1,7 @@
 import { Store } from "redux";
 import { captureException } from "@sentry/browser";
-import StellarHDWallet from "stellar-hd-wallet";
 import { KeyManager } from "@stellar/typescript-wallet-sdk-km";
+import { wallet as sdkWallet } from "@shared/helpers/stellar";
 
 import { CreateAccountMessage } from "@shared/api/types/message-request";
 import { clearAccount } from "../helpers/clear-account";
@@ -19,8 +19,6 @@ import {
   publicKeySelector,
   reset,
 } from "background/ducks/session";
-
-const { fromMnemonic, generateMnemonic } = StellarHDWallet;
 
 export const createAccount = async ({
   request,
@@ -42,18 +40,20 @@ export const createAccount = async ({
     sessionStore.dispatch(reset());
   }
 
-  const mnemonicPhrase = generateMnemonic({ entropyBits: 128 });
-  const wallet = fromMnemonic(mnemonicPhrase);
+  // Use ONLY StellarWallet SDK (Kit) to create the account
+  const { mnemonic: mnemonicPhrase, publicKey: derivedPublicKey } =
+    await sdkWallet.create(password);
 
-  const KEY_DERIVATION_NUMBER = 0;
-  const keyId = KEY_DERIVATION_NUMBER.toString();
-
-  await localStore.setItem(KEY_DERIVATION_NUMBER_ID, keyId);
+  // Retrieve the secret key directly from the SDK's internal state
+  const privateKey = (sdkWallet as any).keypairs.get(derivedPublicKey).secret();
 
   const keyPair = {
-    publicKey: wallet.getPublicKey(KEY_DERIVATION_NUMBER),
-    privateKey: wallet.getSecret(KEY_DERIVATION_NUMBER),
+    publicKey: derivedPublicKey,
+    privateKey: privateKey,
   };
+
+  // Keep derivation index in sync
+  await localStore.setItem(KEY_DERIVATION_NUMBER_ID, "0");
 
   await clearSession({ localStore, sessionStore });
 

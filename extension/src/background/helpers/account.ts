@@ -322,7 +322,11 @@ export const getIsRpcHealthy = async (localStore: DataStorageAccess) => {
 
       if (!res.ok) {
         captureException(`Failed to load rpc health for Soroban`);
-        rpcHealth = { status: "unhealthy" };
+        // Default to healthy – the indexer endpoint being down doesn't mean
+        // the actual Soroban RPC is unavailable. Showing a false-positive
+        // "Soroban is experiencing issues" banner is worse than missing a
+        // real outage notification.
+        rpcHealth = { status: "healthy" };
       } else {
         rpcHealth = await res.json();
       }
@@ -331,6 +335,9 @@ export const getIsRpcHealthy = async (localStore: DataStorageAccess) => {
         `Failed to load rpc health for Soroban - ${JSON.stringify(e)}`,
       );
       console.error(e);
+      // Network error reaching the indexer – assume RPC is healthy so the
+      // user isn't blocked by a misleading alert.
+      rpcHealth = { status: "healthy" };
     }
   }
 

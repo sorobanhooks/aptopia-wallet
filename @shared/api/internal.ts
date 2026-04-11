@@ -4,9 +4,9 @@ import {
   rpc as SorobanRpc,
   Networks,
   Horizon,
-  FeeBumpTransaction,
+  //FeeBumpTransaction,
   StrKey,
-  Transaction,
+  //Transaction,
   TransactionBuilder,
   xdr,
   XdrLargeInt,
@@ -31,8 +31,10 @@ import {
   getSdk,
   isCustomNetwork,
   makeDisplayableBalances,
+  wallet,
   xlmToStroop,
 } from "@shared/helpers/stellar";
+
 import {
   buildSorobanServer,
   getNewTxBuilder,
@@ -78,7 +80,7 @@ import { WalletType } from "../constants/hardwareWallet";
 import { sendMessageToBackground } from "./helpers/extensionMessaging";
 import { getIconUrlFromIssuer } from "./helpers/getIconUrlFromIssuer";
 import { getLedgerKeyAccounts } from "./helpers/getLedgerKeyAccounts";
-import { stellarSdkServer, submitTx } from "./helpers/stellarSdkServer";
+import { stellarSdkServer } from "./helpers/stellarSdkServer";
 import { getIconFromTokenLists } from "./helpers/getIconFromTokenList";
 
 const TRANSACTIONS_LIMIT = 100;
@@ -144,14 +146,17 @@ export const createAccount = async ({
 export const fundAccount = async ({
   activePublicKey,
   publicKey,
+  friendbotUrl,
 }: {
   activePublicKey: string;
   publicKey: string;
+  friendbotUrl?: string;
 }): Promise<void> => {
   try {
     await sendMessageToBackground({
       activePublicKey,
       publicKey,
+      friendbotUrl,
       type: SERVICE_TYPES.FUND_ACCOUNT,
     });
   } catch (e) {
@@ -160,25 +165,23 @@ export const fundAccount = async ({
 };
 
 export const addAccount = async ({
-  activePublicKey,
   password,
 }: {
-  activePublicKey: string;
   password: string;
 }): Promise<{
   publicKey: string;
   allAccounts: Array<Account>;
   hasPrivateKey: boolean;
 }> => {
-  let error = "";
   let publicKey = "";
   let allAccounts = [] as Array<Account>;
   let hasPrivateKey = false;
+  let error = "";
 
   try {
-    ({ allAccounts, error, publicKey, hasPrivateKey } =
+    ({ allAccounts, publicKey, hasPrivateKey, error } =
       await sendMessageToBackground({
-        activePublicKey,
+        activePublicKey: null,
         password,
         type: SERVICE_TYPES.ADD_ACCOUNT,
       }));
@@ -197,10 +200,12 @@ export const importAccount = async ({
   password,
   privateKey,
   activePublicKey,
+  mnemonicPhrase,
 }: {
   password: string;
   privateKey: string;
   activePublicKey: string;
+  mnemonicPhrase?: string;
 }): Promise<{
   publicKey: string;
   allAccounts: Array<Account>;
@@ -217,6 +222,7 @@ export const importAccount = async ({
         activePublicKey,
         password,
         privateKey,
+        mnemonicPhrase,
         type: SERVICE_TYPES.IMPORT_ACCOUNT,
       }));
   } catch (e) {
@@ -592,33 +598,65 @@ export const getAccountIndexerBalances = async ({
   };
 };
 
-export const getTokenPrices = async (tokens: string[]) => {
+export const getTokenPrices = async (tokens: string[], publicKey?: string) => {
   // NOTE: API does not accept LP IDs or custom tokens
   const filteredTokens = tokens.filter((tokenId) => {
     const asset = getAssetFromCanonical(tokenId);
-    return !tokenId.includes(":lp") && !isContractId(asset.issuer);
+    return !tokenId.includes(":lp") && asset && !isContractId(asset.issuer);
   });
-  const url = new URL(`${INDEXER_URL}/token-prices`);
-  const options = {
-    method: "POST",
-    headers: {
-      // eslint-disable-next-line @typescript-eslint/naming-convention
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({ tokens: filteredTokens }),
-  };
-  const response = await fetch(url.href, options);
-  const parsedResponse = (await response.json()) as { data: ApiTokenPrices };
 
-  if (!response.ok) {
-    const _err = JSON.stringify(parsedResponse);
-    captureException(
-      `Failed to fetch token prices - ${response.status}: ${response.statusText}`,
-    );
-    throw new Error(_err);
+  if (!filteredTokens.length) {
+    return {} as ApiTokenPrices;
   }
 
-  return parsedResponse.data;
+  // ── Preferred path: use real AccountBalance[] from the SDK ─────────────────
+  // wallet.getTokenPrices(balancesWithMeta) — Stellar Wallet SDK method
+  // Signature: getTokenPrices(balances: AccountBalance[]): Promise<Record<string, TokenPriceData | null>>
+  // TokenPriceData = { currentPrice: number; percentagePriceChange24h: number | null }
+  let sdkPrices: Record<
+    string,
+    { currentPrice: number; percentagePriceChange24h: number | null } | null
+  > = {};
+
+  if (publicKey) {
+    // Fetch real balances with metadata then pass to getTokenPrices
+    const balancesWithMeta =
+      await wallet.getAccountBalancesWithMetadata(publicKey);
+    sdkPrices = await wallet.getTokenPrices(balancesWithMeta);
+  } else {
+    // Fallback: build minimal AccountBalance[] from token ID strings
+    const sdkBalances = filteredTokens.map((tokenId) => {
+      if (tokenId === "native" || tokenId === "XLM") {
+        return { assetType: "native" as const, balance: "0" };
+      }
+      const [assetCode, assetIssuer] = tokenId.split(":");
+      return {
+        assetType: "credit_alphanum12" as const,
+        balance: "0",
+        assetCode,
+        assetIssuer,
+      };
+    });
+    sdkPrices = await wallet.getTokenPrices(sdkBalances);
+  }
+
+  // Normalise SDK's numeric prices to Freighter's ApiTokenPrices (currentPrice: string)
+  const result: ApiTokenPrices = {};
+  for (const [tokenId, data] of Object.entries(sdkPrices)) {
+    if (!data) {
+      result[tokenId] = null;
+    } else {
+      result[tokenId] = {
+        currentPrice: String(data.currentPrice),
+        percentagePriceChange24h:
+          data.percentagePriceChange24h !== null
+            ? String(data.percentagePriceChange24h)
+            : undefined,
+      };
+    }
+  }
+
+  return result;
 };
 
 export const getDiscoverData = async () => {
@@ -858,7 +896,7 @@ export const getIndexerAccountHistory = async ({
 }: {
   publicKey: string;
   networkDetails: NetworkDetails;
-}): Promise<HorizonOperation[]> => {
+}): Promise<any[]> => {
   try {
     const url = new URL(
       `${INDEXER_URL}/account-history/${publicKey}?network=${networkDetails.network}&is_failed_included=true`,
@@ -866,15 +904,30 @@ export const getIndexerAccountHistory = async ({
 
     const response = await fetch(url.href);
 
-    const data = await response.json();
     if (!response.ok) {
-      throw new Error(data);
+      throw new Error(`Indexer failed: ${response.status}`);
     }
 
+    const data = await response.json();
     return data;
   } catch (e) {
-    console.error(e);
-    return [];
+    console.error("Indexer history failed, falling back to Horizon:", e);
+    // Fallback to Horizon for basic transaction history
+    try {
+      const url =
+        networkDetails?.networkUrl || "https://horizon-testnet.stellar.org";
+      const server = new Horizon.Server(url);
+      const txPage = await server
+        .transactions()
+        .forAccount(publicKey)
+        .limit(20)
+        .order("desc")
+        .call();
+      return txPage.records as any;
+    } catch (fallbackError) {
+      console.error("Horizon history fallback also failed:", fallbackError);
+      return [];
+    }
   }
 };
 
@@ -928,6 +981,19 @@ export const getIsTokenSpec = async ({
   }
 
   return data;
+};
+
+export const getAccountTransactions = async (
+  publicKey: string,
+  options?: { limit?: number; cursor?: string; order?: "asc" | "desc" },
+  _networkDetails?: NetworkDetails,
+) => {
+  try {
+    return await wallet.getAccountTransactions(publicKey, options);
+  } catch (e) {
+    console.error("SDK getAccountTransactions failed:", e);
+    throw e;
+  }
 };
 
 export const getAccountHistory = async (
@@ -990,29 +1056,17 @@ export const getTokenDetails = async ({
         throw new SorobanRpcNotSupportedError();
       }
 
-      // You need one Tx Builder per call in Soroban right now
-      const server = buildSorobanServer(
-        networkDetails.sorobanRpcUrl,
-        networkDetails.networkPassphrase,
-      );
-      const name = await getName(
-        contractId,
-        server,
-        await getNewTxBuilder(publicKey, networkDetails, server),
-      );
-      const symbol = await getSymbol(
-        contractId,
-        server,
-        await getNewTxBuilder(publicKey, networkDetails, server),
-      );
-      const decimals = await getDecimals(
-        contractId,
-        server,
-        await getNewTxBuilder(publicKey, networkDetails, server),
-      );
+      // Use the SDK to fetch metadata from the derived Soroban RPC endpoint
+      const metadata = await wallet.addSorobanToken(contractId);
+      const { symbol, decimals } = metadata;
+      const name = metadata.name || symbol;
 
       let balance;
       if (shouldFetchBalance) {
+        const server = buildSorobanServer(
+          networkDetails.sorobanRpcUrl,
+          networkDetails.networkPassphrase,
+        );
         balance = await getBalance(
           contractId,
           [new Address(publicKey).toScVal()],
@@ -1429,19 +1483,13 @@ export const submitFreighterTransaction = ({
 }: {
   signedXDR: string;
   networkDetails: NetworkDetails;
-}) => {
-  const Sdk = getSdk(networkDetails.networkPassphrase);
-  const tx = Sdk.TransactionBuilder.fromXDR(
+}): Promise<Horizon.HorizonApi.TransactionResponse> =>
+  sendMessageToBackground({
+    type: SERVICE_TYPES.SUBMIT_FREIGHTER_TRANSACTION,
     signedXDR,
-    networkDetails.networkPassphrase,
-  );
-  const server = stellarSdkServer(
-    networkDetails.networkUrl,
-    networkDetails.networkPassphrase,
-  );
-
-  return submitTx({ server, tx });
-};
+    networkDetails,
+    activePublicKey: "", // Not required for submission
+  }) as any as Promise<Horizon.HorizonApi.TransactionResponse>;
 
 export const submitFreighterSorobanTransaction = async ({
   signedXDR,
@@ -1449,54 +1497,13 @@ export const submitFreighterSorobanTransaction = async ({
 }: {
   signedXDR: string;
   networkDetails: NetworkDetails;
-}) => {
-  let tx = {} as Transaction | FeeBumpTransaction;
-  const Sdk = getSdk(networkDetails.networkPassphrase);
-  try {
-    tx = Sdk.TransactionBuilder.fromXDR(
-      signedXDR,
-      networkDetails.networkPassphrase,
-    );
-  } catch (e) {
-    console.error(e);
-  }
-
-  if (!networkDetails.sorobanRpcUrl) {
-    throw new SorobanRpcNotSupportedError();
-  }
-
-  const serverUrl = networkDetails.sorobanRpcUrl || "";
-
-  const server = new Sdk.rpc.Server(serverUrl, {
-    allowHttp: !serverUrl.startsWith("https"),
-  });
-
-  const response = await server.sendTransaction(tx);
-
-  if (response.errorResult) {
-    throw new Error(response.errorResult.result().toString());
-  }
-
-  if (response.status === SendTxStatus.Pending) {
-    let txResponse = await server.getTransaction(response.hash);
-
-    // Poll this until the status is not "NOT_FOUND"
-    while (txResponse.status === GetTxStatus.NotFound) {
-      // See if the transaction is complete
-
-      txResponse = await server.getTransaction(response.hash);
-      // Wait a second
-
-      await new Promise((resolve) => setTimeout(resolve, 1000));
-    }
-
-    return response;
-  } else {
-    throw new Error(
-      `Unabled to submit transaction, status: ${response.status}`,
-    );
-  }
-};
+}): Promise<SorobanRpc.Api.SendTransactionResponse> =>
+  sendMessageToBackground({
+    type: SERVICE_TYPES.SUBMIT_FREIGHTER_SOROBAN_TRANSACTION,
+    signedXDR,
+    networkDetails,
+    activePublicKey: "", // Not required for submission
+  }) as any as Promise<SorobanRpc.Api.SendTransactionResponse>;
 
 export const addRecentAddress = async ({
   activePublicKey,
@@ -2188,11 +2195,57 @@ export const simulateTokenTransfer = async (args: {
     body: JSON.stringify(requestBody),
   };
   const res = await fetch(`${INDEXER_URL}/simulate-token-transfer`, options);
-  const response = await res.json();
-  return {
-    ok: res.ok,
-    response,
-  };
+  if (res.ok) {
+    const response = await res.json();
+    return {
+      ok: true,
+      response,
+    };
+  }
+
+  // Fallback to direct Soroban RPC if Indexer fails
+  try {
+    const rpcUrl = networkDetails.sorobanRpcUrl || networkDetails.networkUrl;
+    const server = buildSorobanServer(rpcUrl, networkDetails.networkPassphrase);
+    const builder = await getNewTxBuilder(
+      publicKey,
+      networkDetails,
+      server,
+      xlmToStroop(transactionFee).toFixed(),
+    );
+
+    const transferParams = [
+      new Address(publicKey).toScVal(),
+      new Address(params.destination).toScVal(),
+      new XdrLargeInt("i128", params.amount).toI128(),
+    ];
+    const transaction = transfer(address, transferParams, memo, builder);
+    const simulationResponse = (await server.simulateTransaction(
+      transaction,
+    )) as SorobanRpc.Api.SimulateTransactionSuccessResponse;
+
+    const preparedTransaction = SorobanRpc.assembleTransaction(
+      transaction,
+      simulationResponse,
+    )
+      .build()
+      .toXDR();
+
+    return {
+      ok: true,
+      response: {
+        simulationResponse,
+        preparedTransaction,
+      },
+    };
+  } catch (e) {
+    console.error("Soroban RPC simulation fallback failed:", e);
+    const response = await res.json();
+    return {
+      ok: false,
+      response,
+    };
+  }
 };
 
 export const simulateTransaction = async (args: {
@@ -2211,11 +2264,44 @@ export const simulateTransaction = async (args: {
     }),
   };
   const res = await fetch(`${INDEXER_URL}/simulate-tx`, options);
-  const response = await res.json();
-  return {
-    ok: res.ok,
-    response,
-  };
+  if (res.ok) {
+    const response = await res.json();
+    return {
+      ok: true,
+      response,
+    };
+  }
+
+  // FALLBACK: Direct Soroban RPC if Indexer fails
+  try {
+    const rpcUrl = networkDetails.sorobanRpcUrl || networkDetails.networkUrl;
+    const server = buildSorobanServer(rpcUrl, networkDetails.networkPassphrase);
+    const transaction = TransactionBuilder.fromXDR(
+      xdr,
+      networkDetails.networkPassphrase,
+    );
+    const simulationResponse = await server.simulateTransaction(transaction);
+    const preparedTransaction = SorobanRpc.assembleTransaction(
+      transaction,
+      simulationResponse as any,
+    )
+      .build()
+      .toXDR();
+    return {
+      ok: true,
+      response: {
+        simulationResponse,
+        preparedTransaction,
+      },
+    };
+  } catch (e) {
+    console.error("Soroban RPC simulate-tx fallback also failed:", e);
+    const response = await res.json();
+    return {
+      ok: false,
+      response,
+    };
+  }
 };
 
 export const getIsAccountMismatch = async ({
@@ -2403,3 +2489,55 @@ export const markQueueActive = async ({
     console.error(e);
   }
 };
+export const buildPaymentTransaction = async (params: {
+  activePublicKey: string;
+  destination: string;
+  assetCode: string;
+  assetIssuer: string;
+  amount: string;
+  memo?: string;
+}): Promise<string> =>
+  sendMessageToBackground({
+    type: SERVICE_TYPES.BUILD_PAYMENT_TRANSACTION,
+    ...params,
+  }) as any as Promise<string>;
+
+export const buildSwapTransaction = async (params: {
+  activePublicKey: string;
+  sourceAsset: string;
+  destAsset: string;
+  amount: string;
+  networkDetails: NetworkDetails;
+  slippagePercent?: string;
+  memo?: string;
+  fee?: string;
+  timeoutSeconds?: number;
+}): Promise<string> =>
+  sendMessageToBackground({
+    type: SERVICE_TYPES.BUILD_SWAP_TRANSACTION,
+    ...params,
+  }) as any as Promise<string>;
+
+export const buildTrustlineTransaction = async (params: {
+  activePublicKey: string;
+  assetCode: string;
+  assetIssuer: string;
+  networkDetails: NetworkDetails;
+  limit?: string;
+}): Promise<string> =>
+  sendMessageToBackground({
+    type: SERVICE_TYPES.BUILD_TRUSTLINE_TRANSACTION,
+    ...params,
+  }) as any as Promise<string>;
+
+export const createTrustline = async (params: {
+  activePublicKey: string;
+  assetCode: string;
+  assetIssuer: string;
+  networkDetails: NetworkDetails;
+  limit?: string;
+}): Promise<any> =>
+  sendMessageToBackground({
+    type: SERVICE_TYPES.CREATE_TRUSTLINE,
+    ...params,
+  }) as any as Promise<any>;

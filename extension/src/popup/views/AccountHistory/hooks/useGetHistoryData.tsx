@@ -1,230 +1,32 @@
 import React, { ReactNode, useReducer } from "react";
-import { useSelector, useDispatch } from "react-redux";
-import { Horizon, TransactionBuilder } from "stellar-sdk";
-import { camelCase } from "lodash";
-import BigNumber from "bignumber.js";
-import {
-  Asset as AssetSds,
-  Icon,
-  Text,
-  TextProps,
-} from "@stellar/design-system";
-import i18n from "popup/helpers/localizationConfig";
-
-import StellarLogo from "popup/assets/stellar-logo.png";
+import { Horizon } from "stellar-sdk";
+import { Icon } from "@stellar/design-system";
 
 import { initialState, isError, reducer } from "helpers/request";
+import { RequestState } from "constants/request";
 import { AccountBalances, useGetBalances } from "helpers/hooks/useGetBalances";
 import { HistoryResponse, useGetHistory } from "helpers/hooks/useGetHistory";
-import { HistoryItemOperation } from "popup/components/accountHistory/HistoryItem";
-import {
-  getIsCreateClaimableBalanceSpam,
-  getIsDustPayment,
-  getIsPayment,
-  getIsSwap,
-} from "popup/helpers/account";
 import {
   AppDataType,
   NeedsReRoute,
   useGetAppData,
 } from "helpers/hooks/useGetAppData";
-import { getCanonicalFromAsset, isMainnet } from "helpers/stellar";
+import { isMainnet } from "helpers/stellar";
 import { APPLICATION_STATE } from "@shared/constants/applicationState";
-import {
-  AssetIcons,
-  Collectible,
-  HorizonOperation,
-  TokenBalance,
-} from "@shared/api/types";
-import { OPERATION_TYPES } from "constants/transaction";
-import {
-  capitalize,
-  formatAmount,
-  trimTrailingZeros,
-} from "popup/helpers/formatters";
-import { getIconUrlFromIssuer } from "@shared/api/helpers/getIconUrlFromIssuer";
 import { NetworkDetails } from "@shared/constants/stellar";
-import {
-  formatTokenAmount,
-  getAttrsFromSorobanHorizonOp,
-  CLASSIC_ASSET_DECIMALS,
-} from "popup/helpers/soroban";
-import { isContractId } from "@shared/api/helpers/soroban";
-import {
-  SorobanCollectibleInterface,
-  SorobanTokenInterface,
-} from "@shared/constants/soroban/token";
-import { getBalanceByKey } from "popup/helpers/balance";
-import { AssetType } from "@shared/api/types/account-balance";
-import {
-  TokenDetailsResponse,
-  useTokenDetails,
-} from "helpers/hooks/useTokenDetails";
-import {
-  homeDomainsSelector,
-  saveDomainForIssuer,
-  saveIconsForBalances,
-  tokensListsSelector,
-} from "popup/ducks/cache";
-import { getAssetDomains } from "@shared/api/internal";
-import { AppDispatch } from "popup/App";
-import { captureException } from "@sentry/browser";
-import {
-  CollectibleInfoImage,
-  getCollectibleName,
-} from "popup/components/account/CollectibleInfo";
-import { AssetListResponse } from "@shared/constants/soroban/asset-list";
-import { getIconFromTokenLists } from "@shared/api/helpers/getIconFromTokenList";
-import IconSoroban from "popup/assets/icon-soroban.svg?react";
-import { batchFetchCollectibles } from "helpers/utils/collectibles/collectiblesBatchFetcher";
-import { ContractIdentifier } from "helpers/utils/collectibles/collectiblesCache";
 
-export type HistorySection = {
-  monthYear: string; // in format {month}:{year}
-  operations: OperationDataRow[];
-};
-
-const renderIconPlaceholder = (
-  tokenCode: string = "",
-  size: TextProps["size"] = "sm",
-) => (
-  <div className="HistoryItem__icon__bordered">
-    <Text
-      as="div"
-      size={size}
-      weight="bold"
-      addlClassName="HistoryItem--placeholder"
-    >
-      {tokenCode.slice(0, 2)}
-    </Text>
-  </div>
-);
-
-export const getSwapIcons = ({
-  destIcon,
-  sourceIcon,
-  srcAssetCode,
-}: {
-  destIcon: string;
-  sourceIcon: string;
-  srcAssetCode: string;
-}) => {
-  return (
-    <>
-      <div className="HistoryItem__icon__swap-source">
-        {sourceIcon && (
-          <AssetSds
-            size="md"
-            variant="single"
-            sourceOne={{
-              altText: i18n.t("Swap source token logo"),
-              image: sourceIcon,
-            }}
-          />
-        )}
-        {!sourceIcon && renderIconPlaceholder(srcAssetCode, "xs")}
-      </div>
-      <div className="HistoryItem__icon__swap-dest">
-        {destIcon && (
-          <AssetSds
-            size="md"
-            variant="single"
-            sourceOne={{
-              altText: i18n.t("Swap destination token logo"),
-              image: destIcon,
-            }}
-          />
-        )}
-        {!destIcon && renderIconPlaceholder(destIcon, "xs")}
-      </div>
-    </>
-  );
-};
-
-export const getPaymentIcon = ({
-  destAssetCode,
-  destIcon,
-}: {
-  destAssetCode: string;
-  destIcon?: string;
-}) => {
-  return destIcon ? (
-    <AssetSds
-      size="lg"
-      variant="single"
-      sourceOne={{
-        altText: i18n.t("Payment token logo"),
-        image: destIcon,
-      }}
-    />
-  ) : (
-    renderIconPlaceholder(destAssetCode)
-  );
-};
-
-export const getTransferIcons = ({
-  isNative,
-  isReceiving,
-  icon,
-}: {
-  isNative: boolean;
-  isReceiving: boolean;
-  icon: string | null;
-}) => (
-  <>
-    {isNative && (
-      <AssetSds
-        size="lg"
-        variant="single"
-        sourceOne={{
-          altText: i18n.t("Stellar token logo"),
-          image: StellarLogo,
-        }}
-      />
-    )}
-    {!isNative && (
-      <div className="HistoryItem__icon__bordered">
-        {icon ? (
-          <AssetSds
-            size="lg"
-            variant="single"
-            sourceOne={{
-              altText: i18n.t("Token logo"),
-              image: icon,
-            }}
-          />
-        ) : (
-          <IconSoroban />
-        )}
-      </div>
-    )}
-    {isReceiving && (
-      <div className="HistoryItem__icon__small HistoryItem--received">
-        <Icon.ArrowDown />
-      </div>
-    )}
-    {!isReceiving && (
-      <div className="HistoryItem__icon__small HistoryItem--sent">
-        <Icon.Send03 />
-      </div>
-    )}
-  </>
-);
-
-export const getCollectibleIcon = ({
-  collectible,
-}: {
-  collectible: Collectible;
-}) => (
-  <div className="HistoryItem__icon__rounded">
-    <CollectibleInfoImage
-      image={collectible.metadata?.image}
-      name={collectible.tokenId}
-      isSmall
-      isHistory
-    />
-  </div>
-);
+export interface OperationDataRow {
+  action: string | null;
+  actionIcon: string;
+  amount: string | null;
+  date: string;
+  id: string;
+  metadata: {
+    [key: string]: any;
+  };
+  rowIcon: ReactNode;
+  rowText: ReactNode;
+}
 
 export const getRowIconByType = (iconType: string) => {
   switch (iconType) {
@@ -252,1007 +54,415 @@ export const getRowIconByType = (iconType: string) => {
   }
 };
 
-export const getActionIconByType = (iconType: string) => {
-  switch (iconType) {
-    case "sent": {
-      return <Icon.ArrowCircleUp />;
-    }
-    case "received": {
-      return <Icon.ArrowCircleDown />;
-    }
-    case "swap": {
-      return <Icon.RefreshCcw03 />;
-    }
-    case "contractInteraction": {
-      return <Icon.FileCode02 />;
-    }
-    case "failed": {
-      return <Icon.AlertCircle />;
-    }
-    case "add": {
-      return <Icon.PlusCircle />;
-    }
-    case "remove": {
-      return <Icon.MinusCircle />;
-    }
-    case "generic": {
-      return <Icon.CheckCircle />;
-    }
-
-    default:
-      return <></>;
-  }
-};
-
-/**
- * Extracts the actual destination address from transaction XDR
- * This is needed because Horizon API returns base G address for M addresses
- */
-const extractDestinationFromXDR = async (
-  txEnvelopeXdr: string,
-  networkDetails: NetworkDetails,
-  fallbackTo: string,
-): Promise<string> => {
-  if (!txEnvelopeXdr) {
-    return fallbackTo;
-  }
-
-  try {
-    const tx = TransactionBuilder.fromXDR(
-      txEnvelopeXdr,
-      networkDetails.networkPassphrase,
-    );
-
-    // Find payment operation and extract destination
-    const paymentOp = tx.operations.find(
-      (op) => op.type === "payment" && "destination" in op,
-    );
-
-    if (paymentOp && "destination" in paymentOp) {
-      const { destination } = paymentOp;
-      // Return the destination from XDR (could be M address)
-      return destination;
-    }
-
-    // Also check for createAccount operation
-    const createAccountOp = tx.operations.find(
-      (op) => op.type === "createAccount" && "destination" in op,
-    );
-
-    if (createAccountOp && "destination" in createAccountOp) {
-      const { destination } = createAccountOp;
-      return destination;
-    }
-
-    // For Soroban invokeHostFunction operations, the destination is in the contract invocation
-    // For now, we'll rely on the fallback (attrs.to) which should already have the correct address
-    // since Soroban operations preserve muxed addresses in their arguments
-  } catch (error) {
-    captureException(`Failed to parse XDR for destination address: ${error}`);
-  }
-
-  return fallbackTo;
-};
-
-/**
- * Retrieves the icon URL for an asset, checking the cache first and fetching from the issuer if needed.
- *
- * This helper function first checks if the icon URL is already cached in the icons object.
- * If not found, it attempts to fetch the icon URL from the issuer using the home domain
- * (either from the provided homeDomains map or by fetching it from the issuer's account).
- * The result is then cached in the icons object for future use.
- *
- * @param {Object} params - The parameters object
- * @param {string} params.key - The asset issuer's public key
- * @param {string} params.code - The asset code (e.g., "USDC")
- * @param {NetworkDetails} params.networkDetails - Network configuration details
- * @param {{ [assetIssuer: string]: string | null }} params.homeDomains - Map of asset issuer keys to their home domains
- * @param {AssetIcons} params.icons - Cache object storing icon URLs keyed by asset canonical format
- * @returns {Promise<string | null>} The icon URL string if found, or null if not available
- */
-const getIconUrl = async ({
-  key,
-  code,
-  networkDetails,
-  homeDomains,
-  icons,
-  cachedTokenLists,
-}: {
-  key: string;
-  code: string;
-  networkDetails: NetworkDetails;
-  homeDomains: { [assetIssuer: string]: string | null };
-  icons: AssetIcons;
-  cachedTokenLists: AssetListResponse[];
-}) => {
-  let iconUrl = icons[getCanonicalFromAsset(code, key)];
-  if (!iconUrl && iconUrl !== null) {
-    if (cachedTokenLists.length > 0) {
-      const { icon } = await getIconFromTokenLists({
-        issuerId: key,
-        code,
-        assetsListsData: cachedTokenLists,
-      });
-      if (icon) {
-        iconUrl = icon;
-      }
-    } else if (!isContractId(key)) {
-      const homeDomain = homeDomains[key || ""] || "";
-      iconUrl = await getIconUrlFromIssuer({
-        key: key || "",
-        code: code || "",
-        networkDetails,
-        homeDomain,
-      });
-    }
-  }
-
-  icons[getCanonicalFromAsset(code, key)] = iconUrl || null;
-  return iconUrl;
-};
-
-export interface AssetDiffSummary {
-  assetCode: string;
-  assetIssuer: string | null;
-  decimals: number;
-  amount: string;
-  isCredit: boolean;
-  destination?: string; // The destination public key for debits
-  icon?: string; // Asset icon URL
-
-  // For payment/createAccount flows
-  sourcePublicKey?: string; // The sending public key
-
-  // For swap flows
-  sourceAmount?: string;
-  sourceAssetCode?: string;
-  sourceIcon?: string;
-}
-
-/**
- * Processes asset_balance_changes for a given public key and returns summaries for each asset
- * @returns Array of asset diff summaries, or empty array if none
- */
-const processAssetBalanceChanges = async (
-  operation: HorizonOperation,
-  publicKey: string,
-  networkDetails: NetworkDetails,
-  homeDomains: { [assetIssuer: string]: string | null },
-  icons: AssetIcons,
-  fetchTokenDetails: (args: {
-    contractId: string;
-    publicKey: string;
-    networkDetails: NetworkDetails;
-  }) => Promise<TokenDetailsResponse | Error>,
-  cachedTokenLists: AssetListResponse[],
-): Promise<AssetDiffSummary[]> => {
-  if (
-    !operation.asset_balance_changes ||
-    operation.asset_balance_changes.length === 0
-  ) {
-    return [];
-  }
-
-  const results: AssetDiffSummary[] = [];
-
-  for (const change of operation.asset_balance_changes) {
-    // Filter to only changes involving this public key
-    if (change.from !== publicKey && change.to !== publicKey) {
-      continue;
-    }
-
-    // Extract asset info - handle native XLM specially
-    let assetCode: string;
-    let assetIssuer: string | null = null;
-
-    if (change.asset_type === "native") {
-      assetCode = "XLM";
-      assetIssuer = null;
-    } else {
-      assetCode = change.asset_code || "";
-      assetIssuer = change.asset_issuer || null;
-    }
-
-    // Determine if this is a credit (receiving) or debit (sending)
-    const isCredit = change.to === publicKey;
-    // Destination is the counterparty (from for credits, to for debits)
-    const destination = isCredit ? change.from : change.to;
-
-    // Get asset icon
-    const icon =
-      assetCode === "XLM"
-        ? StellarLogo
-        : await getIconUrl({
-            key: assetIssuer || "",
-            code: assetCode,
-            networkDetails,
-            homeDomains,
-            icons,
-            cachedTokenLists,
-          });
-
-    // Fetch decimals based on whether it's a Soroban contract
-    let decimals: number;
-
-    // For Soroban contracts, fetch decimals using cached function
-    if (assetIssuer && isContractId(assetIssuer)) {
-      try {
-        const tokenDetailsResponse = await fetchTokenDetails({
-          contractId: assetIssuer,
-          publicKey,
-          networkDetails,
-        });
-
-        if (
-          !tokenDetailsResponse ||
-          isError<TokenDetailsResponse>(tokenDetailsResponse)
-        ) {
-          continue; // Skip this asset if we can't fetch details
-        }
-
-        decimals = tokenDetailsResponse.decimals;
-      } catch (error) {
-        continue; // Skip this asset and move to the next one
-      }
-    } else {
-      // For native XLM and classic assets, use standard decimals
-      decimals = CLASSIC_ASSET_DECIMALS;
-    }
-
-    results.push({
-      assetCode,
-      assetIssuer,
-      decimals,
-      amount: trimTrailingZeros(change.amount),
-      isCredit,
-      destination:
-        destination && destination !== publicKey ? destination : undefined,
-      icon,
-    });
-  }
-
-  return results;
-};
-
-export interface OperationDataRow {
-  action: string | null;
-  actionIcon: string;
-  amount: string | null;
-  date: string;
-  id: string;
-  metadata: {
-    [key: string]: any;
-  };
-  rowIcon: ReactNode;
-  rowText: ReactNode;
-}
-
-// Map key format: "contractId:tokenId"
-export type CollectibleLookupMap = Map<string, Collectible>;
-
-export const getRowDataByOpType = async (
-  publicKey: string,
-  balances: AssetType[],
-  operation: HistoryItemOperation,
-  networkDetails: NetworkDetails,
-  icons: AssetIcons,
-  fetchTokenDetails: (args: {
-    contractId: string;
-    publicKey: string;
-    networkDetails: NetworkDetails;
-  }) => Promise<TokenDetailsResponse | Error>,
-  homeDomains: { [assetIssuer: string]: string | null },
-  collectibleLookup: CollectibleLookupMap,
-  cachedTokenLists: AssetListResponse[],
-): Promise<OperationDataRow> => {
-  const {
-    account,
-    amount,
-    asset_code: assetCode,
-    asset_issuer: assetIssuer,
-    created_at: createdAt,
-    id,
-    to,
-    to_muxed,
-    from,
-    starting_balance: startingBalance,
-    type,
-    type_i: typeI,
-    transaction_attr,
-    isCreateExternalAccount = false,
-    isPayment = false,
-    isSwap = false,
-    transaction_successful: transactionSuccessful,
-  } = operation;
-  const isInvokeHostFn = typeI === 24;
-
-  const {
-    operation_count: operationCount,
-    fee_charged,
-    memo,
-    envelope_xdr: txEnvelopeXdr,
-  } = transaction_attr;
-
-  const date = new Date(Date.parse(createdAt))
-    .toDateString()
-    .split(" ")
-    .slice(1, 3)
-    .join(" ");
-
-  const operationType = camelCase(type) as keyof typeof OPERATION_TYPES;
-  const opTypeStr = OPERATION_TYPES[operationType] || "Transaction";
-  const operationString = `${opTypeStr}${
-    operationCount > 1 ? ` + ${operationCount - 1} ops` : ""
-  }`;
-
-  const baseMetadata = {
-    createdAt,
-    feeCharged: fee_charged,
-    memo,
-    type,
-    isDustPayment: operation.isDustPayment,
-  };
-
-  if (transactionSuccessful == false) {
-    return {
-      action: "Failed",
-      actionIcon: "failed",
-      amount: null,
-      date,
-      id,
-      metadata: {
-        ...baseMetadata,
-        transactionFailed: true,
-      },
-      rowIcon: getRowIconByType("fail"),
-      rowText: i18n.t("Transaction Failed"),
-    };
-  }
-
-  const sourceAssetCode =
-    "source_asset_code" in operation ? operation.source_asset_code : "";
-  const sourceAssetIssuer =
-    "source_asset_issuer" in operation ? operation.source_asset_issuer : "";
-  const srcAssetCode = sourceAssetCode || "XLM";
-  const destAssetCode = assetCode || "XLM";
-  const srcAmount =
-    "source_amount" in operation ? operation.source_amount : null;
-
-  if (isSwap) {
-    const nonLabelAmount = formatAmount(new BigNumber(amount!).toString());
-    const formattedAmount = `+${nonLabelAmount} ${destAssetCode}`;
-    const formattedSrcAmount = srcAmount
-      ? formatAmount(new BigNumber(srcAmount).toString())
-      : null;
-
-    const destIcon =
-      destAssetCode === "XLM"
-        ? StellarLogo
-        : await getIconUrl({
-            key: assetIssuer || "",
-            code: destAssetCode || "",
-            networkDetails,
-            homeDomains,
-            icons,
-            cachedTokenLists,
-          });
-    const sourceIcon =
-      srcAssetCode === "XLM"
-        ? StellarLogo
-        : await getIconUrl({
-            key: sourceAssetIssuer || "",
-            code: srcAssetCode || "",
-            networkDetails,
-            homeDomains,
-            icons,
-            cachedTokenLists,
-          });
-
-    return {
-      action: "Swapped",
-      actionIcon: "swap",
-      amount: formattedAmount,
-      date,
-      id,
-      metadata: {
-        ...baseMetadata,
-        destAssetCode,
-        destIcon,
-        destMinAmount: destAssetCode,
-        formattedSrcAmount,
-        isSwap,
-        nonLabelAmount,
-        sourceIcon,
-        srcAssetCode,
-      },
-      rowIcon: getSwapIcons({ destIcon, srcAssetCode, sourceIcon }),
-      rowText: (
-        <div className="HistoryItem__description__swap-label">
-          <span>{srcAssetCode}</span>
-          <span className="HistoryItem__description__swap-label__separator">
-            {i18n.t("to")}
-          </span>
-          <span>{destAssetCode}</span>
-        </div>
-      ),
-    };
-  }
-
-  if (isPayment) {
-    const destination = to_muxed || to || "";
-    const sender = from || "";
-
-    // default to Sent if a payment to self
-    const isReceiving = destination === publicKey && sender !== publicKey;
-    const paymentDifference = isReceiving ? "+" : "-";
-    const nonLabelAmount = formatAmount(new BigNumber(amount!).toString());
-    const formattedAmount = `${paymentDifference}${nonLabelAmount} ${destAssetCode}`;
-
-    const destIcon =
-      destAssetCode === "XLM"
-        ? StellarLogo
-        : await getIconUrl({
-            key: assetIssuer || "",
-            code: destAssetCode || "",
-            networkDetails,
-            homeDomains,
-            icons,
-            cachedTokenLists,
-          });
-
-    return {
-      action: isReceiving ? i18n.t("Received") : i18n.t("Sent"),
-      actionIcon: isReceiving ? "received" : "sent",
-      amount: formattedAmount,
-      date,
-      id,
-      rowIcon: getPaymentIcon({ destAssetCode, destIcon }),
-      metadata: {
-        ...baseMetadata,
-        destAssetCode,
-        destIcon,
-        isPayment,
-        isReceiving,
-        nonLabelAmount,
-        to: destination,
-        from: sender,
-      },
-      rowText: destAssetCode,
-    };
-  }
-
-  if (isInvokeHostFn) {
-    const genericInvocation = {
-      action: "Interacted",
-      actionIcon: "contractInteraction",
-      amount: null,
-      date,
-      id,
-      metadata: {
-        ...baseMetadata,
-        isInvokeHostFn,
-      },
-      rowIcon: getRowIconByType("generic"),
-      rowText: i18n.t("Contract Function"),
-    };
-
-    const assetDiffs = await processAssetBalanceChanges(
-      operation,
-      publicKey,
-      networkDetails,
-      homeDomains,
-      icons,
-      fetchTokenDetails,
-      cachedTokenLists,
-    );
-
-    if (assetDiffs.length > 0) {
-      // Use first asset diff for the row display amount
-      const primaryDiff = assetDiffs[0];
-      const paymentDifference = primaryDiff.isCredit ? "+" : "-";
-      const formattedAmount =
-        assetDiffs.length > 1
-          ? "Multiple"
-          : `${paymentDifference}${primaryDiff.amount} ${primaryDiff.assetCode}`;
-
-      const attrs = getAttrsFromSorobanHorizonOp(operation, networkDetails);
-      const isTokenTransfer = attrs?.fnName === SorobanTokenInterface.transfer;
-      const isTokenMint = attrs?.fnName === SorobanTokenInterface.mint;
-
-      return {
-        ...genericInvocation,
-        amount: formattedAmount,
-        metadata: {
-          ...genericInvocation.metadata,
-          hasAssetDiffs: true,
-          assetDiffs,
-          isReceiving: primaryDiff.isCredit,
-          isTokenTransfer,
-          isTokenMint,
-          to: primaryDiff.destination,
-          nonLabelAmount: primaryDiff.amount,
-          destAssetCode: primaryDiff.assetCode,
-        },
-      };
-    }
-
-    const attrs = getAttrsFromSorobanHorizonOp(operation, networkDetails);
-    if (!attrs) {
-      return genericInvocation;
-    }
-
-    if (attrs.fnName === SorobanTokenInterface.mint) {
-      const isReceiving = attrs.to === publicKey;
-      const assetBalance = getBalanceByKey(
-        attrs.contractId,
-        balances,
-        networkDetails,
-      );
-
-      if (!assetBalance) {
-        return genericInvocation;
-      }
-
-      const { token, decimals } = assetBalance as TokenBalance;
-      const formattedTokenAmount = attrs.amount
-        ? formatTokenAmount(new BigNumber(attrs.amount), decimals)
-        : "";
-      const formattedAmount = `${
-        isReceiving ? "+" : ""
-      }${formattedTokenAmount} ${token.code}`;
-
-      return {
-        action: isReceiving ? i18n.t("Received") : i18n.t("Minted"),
-        actionIcon: isReceiving ? "received" : "generic",
-        amount: formattedAmount,
-        date,
-        id,
-        metadata: {
-          ...baseMetadata,
-          isTokenMint: true,
-          isInvokeHostFn,
-        },
-        rowIcon: getRowIconByType("generic"),
-        rowText: capitalize(attrs.fnName),
-      };
-    }
-
-    if (
-      attrs.fnName === SorobanTokenInterface.transfer ||
-      attrs.fnName === SorobanCollectibleInterface.transfer
-    ) {
-      // Extract destination from XDR for Soroban transfers (may be muxed)
-      // Note: For Soroban, the destination is in contract args, so we use attrs.to as fallback
-      const actualDestination = await extractDestinationFromXDR(
-        txEnvelopeXdr,
-        networkDetails,
-        attrs.to || "",
-      );
-
-      const isReceiving =
-        actualDestination === publicKey && attrs.from !== publicKey;
-
-      // if the amount is present, we can surmise this is a token transfer
-      if (attrs.amount) {
-        try {
-          const tokenDetailsResponse = await fetchTokenDetails({
-            contractId: attrs.contractId,
-            publicKey,
-            networkDetails,
-          });
-
-          if (
-            !tokenDetailsResponse ||
-            isError<TokenDetailsResponse>(tokenDetailsResponse)
-          ) {
-            return genericInvocation;
-          }
-
-          const { symbol, decimals } = tokenDetailsResponse!;
-          const isNative = symbol === "native";
-          const code = isNative ? "XLM" : symbol;
-          const formattedTokenAmount = formatTokenAmount(
-            new BigNumber(attrs.amount),
-            decimals,
-          );
-
-          const paymentDifference = isReceiving ? "+" : "-";
-          const formattedAmount = `${paymentDifference}${formattedTokenAmount} ${code}`;
-          const icon = await getIconUrl({
-            key: assetIssuer || "",
-            code: destAssetCode || "",
-            networkDetails,
-            homeDomains,
-            icons,
-            cachedTokenLists,
-          });
-
-          return {
-            action: isReceiving ? "Received" : "Sent",
-            actionIcon: isReceiving ? "received" : "sent",
-            amount: formattedAmount,
-            date,
-            id,
-            metadata: {
-              ...baseMetadata,
-              destAssetCode: code,
-              isInvokeHostFn,
-              isTokenTransfer: true,
-              nonLabelAmount: `${formattedTokenAmount} ${code}`,
-              to: actualDestination,
-            },
-            rowIcon: getTransferIcons({ isNative, isReceiving, icon }),
-            rowText: code,
-          };
-        } catch (error) {
-          return genericInvocation;
-        }
-      }
-
-      // otherwise, we treat this as a collectible transfer
-      try {
-        // if the tokenId is not present, we can't fetch the collectible; return generic invocation
-        if (!attrs.tokenId) {
-          return genericInvocation;
-        }
-
-        // Look up collectible from pre-fetched batch data
-        const lookupKey = `${attrs.contractId}:${attrs.tokenId.toString()}`;
-        const collectible = collectibleLookup.get(lookupKey);
-
-        if (!collectible) {
-          return genericInvocation;
-        }
-
-        return {
-          action: isReceiving ? "Received" : "Sent",
-          actionIcon: isReceiving ? "received" : "sent",
-          amount: `#${collectible.tokenId}`,
-          date,
-          id,
-          metadata: {
-            ...baseMetadata,
-            isInvokeHostFn,
-            isCollectibleTransfer: true,
-            to: actualDestination,
-            amount: `#${collectible.tokenId}`,
-            collectionName: collectible.collectionName,
-            collectionTokenId: collectible.tokenId,
-            collectibleName: getCollectibleName(
-              collectible.metadata?.name,
-              collectible.tokenId,
-            ),
-          },
-          rowIcon: getCollectibleIcon({ collectible }),
-          rowText: collectible.collectionName || "Collectible",
-        };
-      } catch (e) {
-        captureException(`Error fetching collectibles: ${e}`);
-        return genericInvocation;
-      }
-    }
-
-    return genericInvocation;
-  }
-
-  switch (operation.type) {
-    case Horizon.HorizonApi.OperationResponseType.createAccount: {
-      // If you're not creating an external account then this means you're
-      // receiving some XLM to create(fund) your own account
-      const isReceiving = !isCreateExternalAccount;
-
-      // Extract destination from XDR for createAccount (may be muxed if sent to muxed address)
-      const actualDestination = await extractDestinationFromXDR(
-        txEnvelopeXdr,
-        networkDetails,
-        account || "",
-      );
-
-      const paymentDifference = isReceiving ? "+" : "-";
-      const nonLabelAmount = formatAmount(
-        new BigNumber(startingBalance!).toString(),
-      );
-      const formattedAmount = `${paymentDifference}${nonLabelAmount} ${destAssetCode}`;
-
-      return {
-        action: isReceiving ? i18n.t("Received") : i18n.t("Sent"),
-        actionIcon: isReceiving ? "received" : "sent",
-        amount: formattedAmount,
-        date,
-        id,
-        metadata: {
-          ...baseMetadata,
-          isReceiving,
-          nonLabelAmount,
-          to: actualDestination,
-          from,
-        },
-        rowIcon: (
-          <div className="HistoryItem__icon__bordered">
-            <Icon.User01 />
-            <div className="HistoryItem__icon__small HistoryItem--create-account">
-              {/* When you've received XLM to create your own account */}
-              {isReceiving && <Icon.Plus />}
-              {/* When you've sent XLM to create external account */}
-              {!isReceiving && <Icon.ArrowUp />}
-            </div>
-          </div>
-        ),
-        rowText: i18n.t("Create Account"),
-      };
-    }
-
-    case Horizon.HorizonApi.OperationResponseType.changeTrust: {
-      const destIcon = await getIconUrl({
-        key: assetIssuer || "",
-        code: destAssetCode || "",
-        networkDetails,
-        homeDomains,
-        icons,
-        cachedTokenLists,
-      });
-
-      return {
-        action: operation.limit === "0.0000000" ? "Removed" : "Added",
-        actionIcon: operation.limit === "0.0000000" ? "remove" : "add",
-        amount: null,
-        date,
-        id,
-        metadata: {
-          ...baseMetadata,
-          destAssetCode,
-        },
-        rowIcon: destIcon ? (
-          <AssetSds
-            size="lg"
-            variant="single"
-            sourceOne={{
-              altText: i18n.t("Asset logo"),
-              image: destIcon,
-            }}
-          />
-        ) : (
-          renderIconPlaceholder(destAssetCode)
-        ),
-        rowText:
-          operation.limit === "0.0000000"
-            ? "Remove trustline"
-            : "Add trustline",
-      };
-    }
-
-    default: {
-      return {
-        action: null,
-        actionIcon: "generic",
-        amount: null,
-        date,
-        id,
-        metadata: {
-          ...baseMetadata,
-        },
-        rowIcon: getRowIconByType("generic"),
-        rowText: operationString,
-      };
-    }
-  }
-};
-
-/**
- * Fetches home domains for asset issuers that are needed for displaying operation icons,
- * and also collects and fetches collectible contracts needed for collectible transfers.
- *
- * This function analyzes a list of Horizon operations to identify asset issuers that require
- * home domains for icon display. It only processes operations that need icons (payments, swaps,
- * and changeTrust operations). For each relevant operation, it checks if the asset issuer's
- * home domain is already cached. If not, it adds the issuer to a list of domains to fetch.
- * After collecting all missing domains, it fetches them in a single batch and updates the
- * homeDomains cache object.
- *
- * Additionally, it identifies collectible transfer operations and batch fetches the needed
- * collectible contracts and token IDs.
- *
- * @param {HorizonOperation[]} operations - Array of Horizon operations to analyze
- * @param {NetworkDetails} networkDetails - Network configuration details
- * @param {string} publicKey - The public key of the account
- * @param {{ [assetIssuer: string]: string | null }} homeDomains - Cache object mapping asset issuer keys to their home domains
- * @returns {Promise<{ homeDomains: { [assetIssuer: string]: string | null }, collectibleLookup: CollectibleLookupMap }>} Object containing updated homeDomains and collectible lookup map
- */
-export const getOperationDependencies = async (
-  operations: HorizonOperation[],
-  networkDetails: NetworkDetails,
-  publicKey: string,
-  homeDomains: { [assetIssuer: string]: string | null },
-) => {
-  const domainsToFetch = new Set<string>();
-  // Collect all collectible contract IDs and token IDs for batch fetching
-  const collectibleContracts = new Map<string, Set<string>>();
-
-  for (const operation of operations) {
-    const { asset_issuer: assetIssuer } = operation;
-    const sourceAssetIssuer =
-      "source_asset_issuer" in operation ? operation.source_asset_issuer : "";
-    const isPayment = getIsPayment(operation.type);
-    const isSwap = getIsSwap(operation);
-
-    const isIconNeeded =
-      isPayment ||
-      isSwap ||
-      operation.type === Horizon.HorizonApi.OperationResponseType.changeTrust;
-    if (isIconNeeded) {
-      if (assetIssuer && !homeDomains[assetIssuer]) {
-        domainsToFetch.add(assetIssuer);
-      }
-      if (sourceAssetIssuer && !homeDomains[sourceAssetIssuer]) {
-        domainsToFetch.add(sourceAssetIssuer);
-      }
-    }
-
-    // Collect collectible contracts in the same loop
-    if (operation.type_i === 24) {
-      const attrs = getAttrsFromSorobanHorizonOp(operation, networkDetails);
-      if (
-        attrs &&
-        attrs.fnName === SorobanCollectibleInterface.transfer &&
-        attrs.tokenId &&
-        !attrs.amount
-      ) {
-        const contractId = attrs.contractId;
-        const tokenId = attrs.tokenId.toString();
-        if (!collectibleContracts.has(contractId)) {
-          collectibleContracts.set(contractId, new Set());
-        }
-        collectibleContracts.get(contractId)!.add(tokenId);
-      }
-    }
-  }
-
-  const domainsArr = Array.from(domainsToFetch);
-  if (domainsArr.length > 0) {
-    const newDomains = await getAssetDomains({
-      assetIssuerDomainsToFetch: domainsArr,
-      networkDetails,
-    });
-
-    Object.entries(newDomains).forEach(([key, value]) => {
-      homeDomains[key] = value;
-    });
-  }
-
-  // Batch fetch all collectibles
-  const collectibleLookup: CollectibleLookupMap = new Map();
-  if (collectibleContracts.size > 0) {
-    const contractsToFetch: ContractIdentifier[] = Array.from(
-      collectibleContracts.entries(),
-    ).map(([contractId, tokenIds]) => ({
-      id: contractId,
-      token_ids: Array.from(tokenIds),
-    }));
-
-    try {
-      const batchResult = await batchFetchCollectibles({
-        publicKey,
-        networkDetails,
-        contracts: contractsToFetch,
-      });
-
-      // Build lookup map: "contractId:tokenId" -> Collectible
-      for (const collection of batchResult.collections) {
-        const contractId =
-          collection.collection?.address || collection.error?.collectionAddress;
-        if (!contractId) continue;
-
-        const collectibles = collection.collection?.collectibles || [];
-        for (const collectible of collectibles) {
-          const lookupKey = `${contractId}:${collectible.tokenId}`;
-          collectibleLookup.set(lookupKey, collectible);
-        }
-      }
-    } catch (error) {
-      captureException(`Error batch fetching collectibles: ${error}`);
-      // Continue with empty lookup map - operations will fall back to generic invocation
-    }
-  }
-
-  return { homeDomains, collectibleLookup };
-};
-
-const createHistorySections = async (
-  publicKey: string,
-  operations: HorizonOperation[],
-  balances: AssetType[],
-  icons: AssetIcons,
-  networkDetails: NetworkDetails,
-  isHideDustEnabled: boolean,
-  fetchTokenDetails: (args: {
-    contractId: string;
-    publicKey: string;
-    networkDetails: NetworkDetails;
-  }) => Promise<TokenDetailsResponse | Error>,
-  homeDomains: { [assetIssuer: string]: string | null },
-  cachedTokenLists: AssetListResponse[],
-) => {
-  /* 
-    To prevent multiple requests for home domains as we build each row, 
-    we iterate through the operations and collect the asset issuers that need home domains in a single request.
-    Also collect and fetch needed collectible contracts.
-  */
-  const { homeDomains: fetchedHomeDomains, collectibleLookup } =
-    await getOperationDependencies(
-      operations,
-      networkDetails,
-      publicKey,
-      homeDomains,
-    );
-  return operations.reduce(
-    async (
-      sectionsPromise: Promise<HistorySection[]>,
-      operation: HorizonOperation,
-    ) => {
-      const sections = await sectionsPromise;
-
-      const isPayment = getIsPayment(operation.type);
-      const isSwap = getIsSwap(operation);
-      const isCreateExternalAccount =
-        operation.type ===
-          Horizon.HorizonApi.OperationResponseType.createAccount &&
-        operation.account !== publicKey;
-      const isDustPayment = getIsDustPayment(publicKey, operation);
-
-      const parsedOperation = {
-        ...operation,
-        isPayment,
-        isSwap,
-        isDustPayment,
-        isCreateExternalAccount,
-      };
-
-      const rowData = await getRowDataByOpType(
-        publicKey,
-        balances,
-        parsedOperation,
-        networkDetails,
-        icons,
-        fetchTokenDetails,
-        fetchedHomeDomains,
-        collectibleLookup,
-        cachedTokenLists,
-      );
-
-      if (isDustPayment && isHideDustEnabled) {
-        return sections;
-      }
-
-      if (getIsCreateClaimableBalanceSpam(operation)) {
-        return sections;
-      }
-
-      const date = new Date(operation.created_at);
-      const month = date.getMonth();
-      const year = date.getFullYear();
-      const monthYear = `${month}:${year}`;
-
-      const lastSection = sections.length > 0 && sections[sections.length - 1];
-
-      // if we have no sections yet, let's create the first one
-      if (!lastSection) {
-        return [{ monthYear, operations: [rowData] }];
-      }
-
-      // if element belongs to this section let's add it right away
-      if (lastSection.monthYear === monthYear) {
-        lastSection.operations.push(rowData);
-        return sections;
-      }
-
-      // otherwise let's add a new section at the bottom of the array
-      return [...sections, { monthYear, operations: [rowData] }];
-    },
-    Promise.resolve([] as HistorySection[]),
+// ---------------------------------------------------------------------------
+// Asset icon helper – shows first 2 chars of the asset code in a circle
+// (matches the look in the original Freighter history view)
+// ---------------------------------------------------------------------------
+const createAssetIcon = (assetCode: string): ReactNode => {
+  const label = assetCode.substring(0, 2).toUpperCase();
+  return (
+    <div
+      className="HistoryItem__icon__bordered"
+      style={{
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+      }}
+    >
+      <span
+        style={{
+          fontSize: "0.75rem",
+          fontWeight: 600,
+          lineHeight: 1,
+          letterSpacing: "0.02em",
+        }}
+      >
+        {label}
+      </span>
+    </div>
   );
 };
 
-interface ResolvedData {
+// ---------------------------------------------------------------------------
+// Build a single OperationDataRow from a Horizon operation record
+// ---------------------------------------------------------------------------
+const buildOperationRow = (
+  op: any,
+  publicKey: string,
+  date: string,
+): OperationDataRow => {
+  const type = op.type as string;
+
+  // ── Payment / path-payment ───────────────────────────────────────────
+  if (
+    type === "payment" ||
+    type === "path_payment_strict_receive" ||
+    type === "path_payment_strict_send"
+  ) {
+    // Swap detection: path-payment where sender === receiver
+    const isSwap =
+      (type === "path_payment_strict_receive" ||
+        type === "path_payment_strict_send") &&
+      op.source_account === op.to;
+
+    if (isSwap) {
+      const fromAsset =
+        op.source_asset_type === "native"
+          ? "XLM"
+          : op.source_asset_code || "Unknown";
+      const toAsset =
+        op.asset_type === "native" ? "XLM" : op.asset_code || "Unknown";
+      return {
+        action: "Swap",
+        actionIcon: "swap",
+        amount: `${fromAsset} → ${toAsset}`,
+        date,
+        id: op.id,
+        metadata: { type, fromAsset, toAsset },
+        rowIcon: (
+          <div className="HistoryItem__icon__bordered">
+            <Icon.RefreshCcw03 />
+          </div>
+        ),
+        rowText: `${fromAsset} → ${toAsset}`,
+      };
+    }
+
+    const isReceived = op.to === publicKey;
+    const assetCode =
+      op.asset_type === "native" ? "XLM" : op.asset_code || "Unknown";
+    const amount = op.amount || "0";
+    const formattedAmount = isReceived
+      ? `+${amount} ${assetCode}`
+      : `-${amount} ${assetCode}`;
+
+    return {
+      action: isReceived ? "Received" : "Sent",
+      actionIcon: isReceived ? "received" : "sent",
+      amount: formattedAmount,
+      date,
+      id: op.id,
+      metadata: {
+        type,
+        assetCode,
+        assetIssuer: op.asset_issuer,
+        to: op.to,
+        from: op.from || op.source_account,
+      },
+      rowIcon: createAssetIcon(assetCode),
+      rowText: assetCode,
+    };
+  }
+
+  // ── Change trust ─────────────────────────────────────────────────────
+  if (type === "change_trust") {
+    const assetCode = op.asset_code || "Unknown";
+    const isRemove = op.limit === "0";
+    return {
+      action: isRemove ? "Removed" : "Added",
+      actionIcon: isRemove ? "remove" : "add",
+      amount: null,
+      date,
+      id: op.id,
+      metadata: { type, assetCode },
+      rowIcon: createAssetIcon(assetCode),
+      rowText: isRemove ? "Remove trustline" : "Add trustline",
+    };
+  }
+
+  // ── Create account ───────────────────────────────────────────────────
+  if (type === "create_account") {
+    const isReceived = op.account === publicKey;
+    const startBal = op.starting_balance || "0";
+    return {
+      action: isReceived ? "Received" : "Created",
+      actionIcon: isReceived ? "received" : "sent",
+      amount: isReceived ? `+${startBal} XLM` : `-${startBal} XLM`,
+      date,
+      id: op.id,
+      metadata: { type },
+      rowIcon: createAssetIcon("XLM"),
+      rowText: "XLM",
+    };
+  }
+
+  // ── Soroban: invoke_host_function ────────────────────────────────────
+  if (type === "invoke_host_function") {
+    return {
+      action: "Contract call",
+      actionIcon: "contractInteraction",
+      amount: null,
+      date,
+      id: op.id,
+      metadata: { type },
+      rowIcon: (
+        <div className="HistoryItem__icon__bordered">
+          <Icon.FileCode02 />
+        </div>
+      ),
+      rowText: "Smart Contract",
+    };
+  }
+
+  // ── Soroban maintenance ──────────────────────────────────────────────
+  if (type === "extend_footprint_ttl" || type === "restore_footprint") {
+    return {
+      action: "Soroban",
+      actionIcon: "genericAction",
+      amount: null,
+      date,
+      id: op.id,
+      metadata: { type },
+      rowIcon: (
+        <div className="HistoryItem__icon__bordered">
+          <Icon.FileCode02 />
+        </div>
+      ),
+      rowText:
+        type === "extend_footprint_ttl"
+          ? "Extend TTL"
+          : "Restore Footprint",
+    };
+  }
+
+  // ── Manage offers (DEX) ──────────────────────────────────────────────
+  if (
+    type === "manage_sell_offer" ||
+    type === "manage_buy_offer" ||
+    type === "create_passive_sell_offer"
+  ) {
+    const sellingAsset =
+      op.selling_asset_type === "native"
+        ? "XLM"
+        : op.selling_asset_code || "Unknown";
+    const buyingAsset =
+      op.buying_asset_type === "native"
+        ? "XLM"
+        : op.buying_asset_code || "Unknown";
+    return {
+      action: `${sellingAsset} → ${buyingAsset}`,
+      actionIcon: "swap",
+      amount: op.amount ? `${op.amount} ${sellingAsset}` : null,
+      date,
+      id: op.id,
+      metadata: { type },
+      rowIcon: (
+        <div className="HistoryItem__icon__bordered">
+          <Icon.RefreshCcw03 />
+        </div>
+      ),
+      rowText: "Manage Offer",
+    };
+  }
+
+  // ── Account merge ────────────────────────────────────────────────────
+  if (type === "account_merge") {
+    const isReceived = op.into === publicKey;
+    return {
+      action: isReceived ? "Merged in" : "Merged out",
+      actionIcon: isReceived ? "received" : "sent",
+      amount: null,
+      date,
+      id: op.id,
+      metadata: { type },
+      rowIcon: createAssetIcon("XLM"),
+      rowText: "Account Merge",
+    };
+  }
+
+  // ── Claimable balances ───────────────────────────────────────────────
+  if (type === "claim_claimable_balance") {
+    return {
+      action: "Claimed",
+      actionIcon: "received",
+      amount: null,
+      date,
+      id: op.id,
+      metadata: { type },
+      rowIcon: (
+        <div className="HistoryItem__icon__bordered">
+          <Icon.CheckCircle />
+        </div>
+      ),
+      rowText: "Claim Balance",
+    };
+  }
+  if (type === "create_claimable_balance") {
+    const cbAssetCode =
+      op.asset?.split(":")?.[0] || (op.asset === "native" ? "XLM" : "");
+    return {
+      action: "Created",
+      actionIcon: "sent",
+      amount: op.amount ? `-${op.amount} ${cbAssetCode}` : null,
+      date,
+      id: op.id,
+      metadata: { type },
+      rowIcon: (
+        <div className="HistoryItem__icon__bordered">
+          <Icon.PlusCircle />
+        </div>
+      ),
+      rowText: "Claimable Balance",
+    };
+  }
+
+  // ── Set options ──────────────────────────────────────────────────────
+  if (type === "set_options") {
+    return {
+      action: "Updated",
+      actionIcon: "genericAction",
+      amount: null,
+      date,
+      id: op.id,
+      metadata: { type },
+      rowIcon: getRowIconByType("generic"),
+      rowText: "Set Options",
+    };
+  }
+
+  // ── Manage data ──────────────────────────────────────────────────────
+  if (type === "manage_data") {
+    return {
+      action: op.value ? "Set" : "Removed",
+      actionIcon: op.value ? "add" : "remove",
+      amount: null,
+      date,
+      id: op.id,
+      metadata: { type, name: op.name },
+      rowIcon: getRowIconByType("generic"),
+      rowText: `Data: ${op.name || "entry"}`,
+    };
+  }
+
+  // ── Default fallback ────────────────────────────────────────────────
+  return {
+    action: "Transaction",
+    actionIcon: "genericAction",
+    amount: null,
+    date,
+    id: op.id,
+    metadata: { type },
+    rowIcon: getRowIconByType("generic"),
+    rowText: type
+      .replace(/_/g, " ")
+      .replace(/\b\w/g, (c: string) => c.toUpperCase()),
+  };
+};
+
+// ---------------------------------------------------------------------------
+// createHistorySections – enriches SDK transaction data with Horizon
+// operation details so each row shows asset name, amount, direction, etc.
+// ---------------------------------------------------------------------------
+export interface HistorySection {
+  monthYear: string;
+  operations: OperationDataRow[];
+}
+
+const createHistorySections = async (
+  transactions: any[],
+  publicKey: string,
+  networkDetails: NetworkDetails,
+): Promise<HistorySection[]> => {
+  // Fetch account operations from Horizon in a single call (much faster
+  // than fetching per-transaction). Group them by transaction hash later.
+  let accountOps: any[] = [];
+  try {
+    const server = new Horizon.Server(networkDetails.networkUrl);
+    const opsPage = await server
+      .operations()
+      .forAccount(publicKey)
+      .limit(200)
+      .order("desc")
+      .call();
+    accountOps = opsPage.records;
+  } catch (e) {
+    console.error("Failed to fetch operations from Horizon:", e);
+  }
+
+  // Group operations by their parent transaction hash
+  const opsByTxHash = new Map<string, any[]>();
+  for (const op of accountOps) {
+    const txHash = op.transaction_hash;
+    if (!opsByTxHash.has(txHash)) {
+      opsByTxHash.set(txHash, []);
+    }
+    opsByTxHash.get(txHash)!.push(op);
+  }
+
+  const sections: HistorySection[] = [];
+
+  for (const tx of transactions) {
+    const txHash = tx.hash || tx.id;
+    const isFailed = tx.successful === false;
+    const dateStr = tx.created_at || new Date().toISOString();
+    const txDate = new Date(dateStr);
+    const date = txDate.toDateString().split(" ").slice(1, 3).join(" ");
+    const month = txDate.getMonth();
+    const year = txDate.getFullYear();
+    const monthYear = `${month}:${year}`;
+
+    let rows: OperationDataRow[] = [];
+
+    if (isFailed) {
+      // Failed transactions get a single "Transaction Failed" row
+      rows = [
+        {
+          action: "Failed",
+          actionIcon: "failed",
+          amount: null,
+          date,
+          id: txHash,
+          metadata: {
+            type: "transaction",
+            transactionFailed: true,
+            createdAt: tx.created_at,
+          },
+          rowIcon: getRowIconByType("fail"),
+          rowText: "Transaction Failed",
+        },
+      ];
+    } else {
+      const ops = opsByTxHash.get(txHash) || [];
+      if (ops.length > 0) {
+        // We have detailed operations – build a row per operation
+        rows = ops.map((op) => buildOperationRow(op, publicKey, date));
+      } else {
+        // Fallback: operations not found (e.g. outside the 200-op window)
+        rows = [
+          {
+            action: "Transaction",
+            actionIcon: "genericAction",
+            amount: null,
+            date,
+            id: txHash,
+            metadata: {
+              type: "transaction",
+              createdAt: tx.created_at,
+              memo: tx.memo,
+            },
+            rowIcon: getRowIconByType("generic"),
+            rowText: `Transaction (${tx.operation_count} ops)`,
+          },
+        ];
+      }
+    }
+
+    // Insert rows into the correct month section
+    for (const row of rows) {
+      const lastSection =
+        sections.length > 0 ? sections[sections.length - 1] : null;
+      if (lastSection && lastSection.monthYear === monthYear) {
+        lastSection.operations.push(row);
+      } else {
+        sections.push({ monthYear, operations: [row] });
+      }
+    }
+  }
+
+  return sections;
+};
+
+export interface ResolvedData {
   type: AppDataType.RESOLVED;
   balances: AccountBalances;
   history: HistorySection[];
@@ -1260,34 +470,35 @@ interface ResolvedData {
   applicationState: APPLICATION_STATE;
 }
 
-type HistoryData = ResolvedData | NeedsReRoute;
+export type HistoryData = ResolvedData | NeedsReRoute;
+
+import {
+  resolvedHistorySelector,
+  saveResolvedHistory,
+} from "popup/ducks/cache";
+import { AppDispatch } from "popup/App";
+import { useDispatch, useSelector } from "react-redux";
 
 function useGetHistoryData(
   balanceOptions: {
     showHidden: boolean;
     includeIcons: boolean;
   },
-  historyOptions: {
-    isHideDustEnabled: boolean;
-  },
 ) {
+  const reduxDispatch = useDispatch<AppDispatch>();
   const [state, dispatch] = useReducer(
     reducer<HistoryData, unknown>,
     initialState,
   );
+  const cachedHistory = useSelector(resolvedHistorySelector);
   const { fetchData: fetchAppData } = useGetAppData();
   const { fetchData: fetchBalances } = useGetBalances(balanceOptions);
   const { fetchData: fetchHistory } = useGetHistory();
-  const { fetchData: fetchTokenDetails } = useTokenDetails();
-  const cachedTokenLists = useSelector(tokensListsSelector);
-  const homeDomains = useSelector(homeDomainsSelector);
-  const reduxDispatch = useDispatch<AppDispatch>();
 
   const fetchData = async (
     useBalancesCache = false,
     useHistoryCache = false,
   ) => {
-    dispatch({ type: "FETCH_DATA_START" });
     try {
       const appData = await fetchAppData();
       if (isError(appData)) {
@@ -1301,6 +512,15 @@ function useGetHistoryData(
 
       const publicKey = appData.account.publicKey;
       const networkDetails = appData.settings.networkDetails;
+
+      // STALE-WHILE-REVALIDATE: If we have cached data, show it first
+      const cachedData = cachedHistory[networkDetails.network]?.[publicKey];
+      if (cachedData && state.state === RequestState.IDLE) {
+        dispatch({ type: "FETCH_DATA_SUCCESS", payload: cachedData });
+      } else if (!cachedData && state.state !== RequestState.SUCCESS) {
+        dispatch({ type: "FETCH_DATA_START" });
+      }
+
       const isMainnetNetwork = isMainnet(networkDetails);
       const balancesResult = await fetchBalances(
         publicKey,
@@ -1322,39 +542,34 @@ function useGetHistoryData(
         throw new Error(history.message);
       }
 
-      const cachedHomeDomains = { ...homeDomains[networkDetails.network] } as {
-        [assetIssuer: string]: string | null;
-      };
-
-      const cachedIcons = { ...(balancesResult.icons || {}) };
-
       const payload = {
         type: AppDataType.RESOLVED,
         publicKey,
         balances: balancesResult,
         applicationState: appData.account.applicationState,
         history: await createHistorySections(
-          publicKey,
           history,
-          balancesResult.balances,
-          cachedIcons,
+          publicKey,
           networkDetails,
-          historyOptions.isHideDustEnabled,
-          fetchTokenDetails,
-          cachedHomeDomains,
-          cachedTokenLists,
         ),
       } as ResolvedData;
 
-      // If we found new home domains and icons during iteration, save them to the cache
-      reduxDispatch(
-        saveDomainForIssuer({ networkDetails, homeDomains: cachedHomeDomains }),
-      );
-      reduxDispatch(saveIconsForBalances({ icons: cachedIcons }));
       dispatch({ type: "FETCH_DATA_SUCCESS", payload });
+      
+      // Persist resolved history to Redux cache
+      reduxDispatch(
+        saveResolvedHistory({
+          publicKey,
+          network: networkDetails.network,
+          data: payload,
+        }),
+      );
+      
       return payload;
     } catch (error) {
-      dispatch({ type: "FETCH_DATA_ERROR", payload: error });
+      if (state.state !== RequestState.SUCCESS) {
+        dispatch({ type: "FETCH_DATA_ERROR", payload: error });
+      }
       return error;
     }
   };

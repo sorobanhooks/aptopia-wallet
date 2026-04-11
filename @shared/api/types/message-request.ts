@@ -104,6 +104,7 @@ export interface KeyPair {
 export interface FundAccountMessage extends BaseMessage {
   type: SERVICE_TYPES.FUND_ACCOUNT;
   publicKey: string;
+  friendbotUrl?: string;
 }
 
 export interface CreateAccountMessage extends BaseMessage {
@@ -121,6 +122,7 @@ export interface ImportAccountMessage extends BaseMessage {
   type: SERVICE_TYPES.IMPORT_ACCOUNT;
   password: string;
   privateKey: string;
+  mnemonicPhrase?: string;
 }
 
 export interface ImportHardWareWalletMessage extends BaseMessage {
@@ -196,6 +198,15 @@ export interface ShowBackupPhraseMessage extends BaseMessage {
 export interface ConfirmPasswordMessage extends BaseMessage {
   type: SERVICE_TYPES.CONFIRM_PASSWORD;
   password: string;
+}
+
+export interface BuildPaymentTransactionMessage extends BaseMessage {
+  type: SERVICE_TYPES.BUILD_PAYMENT_TRANSACTION;
+  destination: string;
+  assetCode: string;
+  assetIssuer: string;
+  amount: string;
+  memo?: string;
 }
 
 export interface GrantAccessMessage extends BaseMessage {
@@ -444,6 +455,46 @@ export interface MarkQueueActiveMessage extends BaseMessage {
   isActive: boolean;
 }
 
+export interface SubmitFreighterTransactionMessage extends BaseMessage {
+  type: SERVICE_TYPES.SUBMIT_FREIGHTER_TRANSACTION;
+  signedXDR: string;
+  networkDetails: NetworkDetails;
+}
+
+export interface SubmitFreighterSorobanTransactionMessage extends BaseMessage {
+  type: SERVICE_TYPES.SUBMIT_FREIGHTER_SOROBAN_TRANSACTION;
+  signedXDR: string;
+  networkDetails: NetworkDetails;
+}
+
+export interface BuildSwapTransactionMessage extends BaseMessage {
+  type: SERVICE_TYPES.BUILD_SWAP_TRANSACTION;
+  sourceAsset: string;
+  destAsset: string;
+  amount: string;
+  networkDetails: NetworkDetails;
+  slippagePercent?: string;
+  memo?: string;
+  fee?: string;
+  timeoutSeconds?: number;
+}
+
+export interface BuildTrustlineTransactionMessage extends BaseMessage {
+  type: SERVICE_TYPES.BUILD_TRUSTLINE_TRANSACTION;
+  assetCode: string;
+  assetIssuer: string;
+  networkDetails: NetworkDetails;
+  limit?: string;
+}
+
+export interface CreateTrustlineMessage extends BaseMessage {
+  type: SERVICE_TYPES.CREATE_TRUSTLINE;
+  assetCode: string;
+  assetIssuer: string;
+  networkDetails: NetworkDetails;
+  limit?: string;
+}
+
 export type ServiceMessageRequest =
   | FundAccountMessage
   | CreateAccountMessage
@@ -493,6 +544,7 @@ export type ServiceMessageRequest =
   | AddTokenIdMessage
   | GetTokenIdsMessage
   | RemoveTokenIdMessage
+  | GetTokenIdsMessage
   | GetMigratableAccountsMessage
   | GetMigratedMnemonicPhraseMessage
   | MigrateAccountsMessage
@@ -508,4 +560,10 @@ export type ServiceMessageRequest =
   | GetCollectiblesMessage
   | ChangeCollectibleVisibilityMessage
   | GetHiddenCollectiblesMessage
-  | MarkQueueActiveMessage;
+  | MarkQueueActiveMessage
+  | BuildPaymentTransactionMessage
+  | SubmitFreighterTransactionMessage
+  | SubmitFreighterSorobanTransactionMessage
+  | BuildSwapTransactionMessage
+  | BuildTrustlineTransactionMessage
+  | CreateTrustlineMessage;

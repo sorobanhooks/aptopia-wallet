@@ -55,4 +55,8 @@ export enum ROUTES {
 
   discover = "/discover",
   wallets = "/wallets",
+  dashboard = "/dashboard",
+  agentConfig = "/agent-config",
+  activityLog = "/activity-log",
+  confirmTrade = "/confirm-trade",
 }

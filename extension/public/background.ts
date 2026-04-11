@@ -3,9 +3,13 @@ import {
   initExtensionMessageListener,
   initInstalledListener,
   initAlarmListener,
+  initSDKStorage,
 } from "background";
 
-function main() {
+async function main() {
+  // Ensure storage is ready before initializing listeners
+  await initSDKStorage();
+  
   initContentScriptMessageListener();
   initExtensionMessageListener();
   initInstalledListener();

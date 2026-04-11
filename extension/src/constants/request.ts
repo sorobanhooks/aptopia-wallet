@@ -11,10 +11,10 @@ export interface SuccessState<T> {
   error: null;
 }
 
-export interface ErrorState<T> {
+export interface ErrorState<T, K> {
   state: RequestState.ERROR;
-  data: null;
-  error: T;
+  data: T | null;
+  error: K;
 }
 
 export interface IdleState {
@@ -23,19 +23,19 @@ export interface IdleState {
   error: null;
 }
 
-export interface LoadingState {
+export interface LoadingState<T> {
   state: RequestState.LOADING;
-  data: null;
+  data: T | null;
   error: null;
 }
 
 export type State<T, K> =
   | IdleState
-  | LoadingState
+  | LoadingState<T>
   | SuccessState<T>
-  | ErrorState<K>;
+  | ErrorState<T, K>;
 
 export type Action<T, K> =
   | { type: "FETCH_DATA_START" }
   | { type: "FETCH_DATA_SUCCESS"; payload: SuccessState<T>["data"] }
-  | { type: "FETCH_DATA_ERROR"; payload: ErrorState<K>["error"] };
+  | { type: "FETCH_DATA_ERROR"; payload: ErrorState<T, K>["error"] };

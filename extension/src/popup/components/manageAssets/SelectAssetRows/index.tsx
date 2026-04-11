@@ -101,9 +101,9 @@ export const SelectAssetRows = ({
                   : transactionData.asset,
               );
               isSoroswap =
-                !!soroswapTokens.find(({ contract }) => contract === issuer) ||
-                !!soroswapTokens.find(
-                  ({ contract }) => contract === otherAsset.issuer,
+                !!soroswapTokens?.find(({ contract }) => contract === issuer) ||
+                !!soroswapTokens?.find(
+                  ({ contract }) => contract === otherAsset?.issuer,
                 );
             }
 

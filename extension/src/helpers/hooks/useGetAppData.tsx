@@ -2,7 +2,8 @@ import { useReducer } from "react";
 import { useDispatch, useSelector } from "react-redux";
 import * as Sentry from "@sentry/browser";
 
-import { initialState, reducer } from "../request";
+import { reducer } from "../request";
+import { RequestState } from "constants/request";
 import { storeAccountMetricsData } from "../metrics";
 import {
   loadAccount,
@@ -43,21 +44,49 @@ interface ResolvedData {
 export type AppData = NeedsReRoute | ResolvedData;
 
 function useGetAppData() {
-  const [state, dispatch] = useReducer(reducer<AppData, unknown>, initialState);
-  const reduxDispatch = useDispatch();
   const currentAccount = useSelector(accountSelector);
   const currentSettings = useSelector(settingsSelector);
+
+  const [state, dispatch] = useReducer(
+    reducer<AppData, unknown>,
+    (currentAccount.publicKey
+      ? {
+          state: RequestState.SUCCESS,
+          data: {
+            type: AppDataType.RESOLVED,
+            account: currentAccount,
+            settings: currentSettings,
+          },
+          error: null,
+        }
+      : {
+          state: RequestState.IDLE,
+          data: null,
+          error: null,
+        }) as any,
+  );
+
+  const reduxDispatch = useDispatch();
 
   const fetchData = async (
     useCache = true,
     useBackendSettings = true,
   ): Promise<AppData | Error> => {
-    dispatch({ type: "FETCH_DATA_START" });
-    reduxDispatch(saveApplicationState(APPLICATION_STATE.APPLICATION_LOADING));
+    const hasCache = !!(useCache && currentAccount.publicKey);
+
+    // Only set loading state if we don't have cached data yet,
+    // and if we're not already in a success state from a previous fetch
+    const isRevalidating = hasCache || state.state === RequestState.SUCCESS;
+    if (!isRevalidating) {
+      dispatch({ type: "FETCH_DATA_START" });
+      reduxDispatch(
+        saveApplicationState(APPLICATION_STATE.APPLICATION_LOADING),
+      );
+    }
     try {
-      if (useCache && currentAccount.publicKey) {
+      if (hasCache) {
         const payload = {
-          type: "resolved",
+          type: "resolved" as const,
           account: currentAccount,
           settings: currentSettings,
         } as ResolvedData;

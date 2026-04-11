@@ -11,7 +11,10 @@ import {
   useBlockaidOverrideState,
 } from "popup/helpers/blockaid";
 import { BlockAidScanAssetResult } from "@shared/api/types";
-import { getManageAssetXDR } from "popup/helpers/getManageAssetXDR";
+import {
+  buildTrustlineTransaction as internalBuildTrustlineTransaction,
+} from "@shared/api/internal";
+
 import { FlaggedKeys } from "types/transactions";
 import { isAssetSac } from "popup/helpers/soroban";
 
@@ -33,7 +36,7 @@ export interface ChangeTrustData {
 function useGetChangeTrustData({
   asset,
   networkDetails,
-  recommendedFee,
+  //recommendedFee,
   publicKey,
   addTrustline,
 }: {
@@ -90,16 +93,15 @@ function useGetChangeTrustData({
         );
         payload.scanResult = scannedAsset;
 
-        const transactionXDR = await getManageAssetXDR({
-          publicKey,
+        const transactionXDR = await internalBuildTrustlineTransaction({
+          activePublicKey: publicKey,
           assetCode: asset.code,
           assetIssuer: asset.issuer,
-          addTrustline,
-          server,
-          recommendedFee,
           networkDetails,
+          limit: addTrustline ? undefined : "0",
         });
         payload.transactionXDR = transactionXDR;
+
         payload.isAssetUnableToScan = shouldTreatAssetAsUnableToScan(
           scannedAsset,
           blockaidOverrideState,

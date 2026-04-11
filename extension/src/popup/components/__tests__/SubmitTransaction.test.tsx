@@ -27,7 +27,16 @@ jest
   );
 jest
   .spyOn(ApiInternal, "submitFreighterTransaction")
-  .mockImplementation(() => Promise.resolve({ successful: true }));
+  .mockImplementation(() =>
+    Promise.resolve({
+      successful: true,
+      hash: "abc",
+      ledger: 123,
+      envelope_xdr: "xyz",
+      result_xdr: "123",
+      result_meta_xdr: "456",
+    } as any),
+  );
 
 describe("SubmitTransaction", () => {
   it("renders submit transaction", () => {

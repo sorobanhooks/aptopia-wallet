@@ -89,6 +89,12 @@ import { addCollectible } from "./handlers/addCollectible";
 import { getCollectibles } from "./handlers/getCollectibles";
 import { changeCollectibleVisibility } from "./handlers/changeCollectibleVisibility";
 import { getHiddenCollectibles } from "./handlers/getHiddenCollectibles";
+import { buildPaymentTransaction } from "./handlers/buildPaymentTransaction";
+import { submitFreighterTransaction } from "./handlers/submitFreighterTransaction";
+import { submitFreighterSorobanTransaction } from "./handlers/submitFreighterSorobanTransaction";
+import { buildSwapTransaction } from "./handlers/buildSwapTransaction";
+import { buildTrustlineTransaction } from "./handlers/buildTrustlineTransaction";
+import { createTrustline } from "./handlers/createTrustline";
 
 const numOfPublicKeysToCheck = 5;
 
@@ -137,7 +143,7 @@ export const popupMessageListener = (
 
   switch (request.type) {
     case SERVICE_TYPES.FUND_ACCOUNT: {
-      return fundAccount({ request, localStore });
+      return fundAccount({ request });
     }
     case SERVICE_TYPES.CREATE_ACCOUNT: {
       return createAccount({
@@ -308,8 +314,6 @@ export const popupMessageListener = (
     case SERVICE_TYPES.SIGN_BLOB: {
       return signBlob({
         request,
-        localStore,
-        sessionStore,
         responseQueue,
         blobQueue,
       });
@@ -317,8 +321,6 @@ export const popupMessageListener = (
     case SERVICE_TYPES.SIGN_AUTH_ENTRY: {
       return signAuthEntry({
         request,
-        localStore,
-        sessionStore,
         responseQueue,
         authEntryQueue,
       });
@@ -333,17 +335,14 @@ export const popupMessageListener = (
     case SERVICE_TYPES.SIGN_FREIGHTER_TRANSACTION: {
       return signFreighterTransaction({
         request,
-        localStore,
-        sessionStore,
       });
     }
     case SERVICE_TYPES.SIGN_FREIGHTER_SOROBAN_TRANSACTION: {
       return signFreighterTransaction({
         request,
-        localStore,
-        sessionStore,
       });
     }
+
     case SERVICE_TYPES.ADD_RECENT_ADDRESS: {
       return addRecentAddress({
         request,
@@ -552,6 +551,26 @@ export const popupMessageListener = (
       }
       return {};
     }
+
+    case SERVICE_TYPES.BUILD_PAYMENT_TRANSACTION: {
+      return buildPaymentTransaction({ request, localStore });
+    }
+    case SERVICE_TYPES.SUBMIT_FREIGHTER_TRANSACTION: {
+      return submitFreighterTransaction({ request });
+    }
+    case SERVICE_TYPES.SUBMIT_FREIGHTER_SOROBAN_TRANSACTION: {
+      return submitFreighterSorobanTransaction({ request });
+    }
+    case SERVICE_TYPES.BUILD_SWAP_TRANSACTION: {
+      return buildSwapTransaction({ request });
+    }
+    case SERVICE_TYPES.BUILD_TRUSTLINE_TRANSACTION: {
+      return buildTrustlineTransaction({ request });
+    }
+    case SERVICE_TYPES.CREATE_TRUSTLINE: {
+      return createTrustline({ request });
+    }
+
 
     default:
       return { error: "Message type not supported" };

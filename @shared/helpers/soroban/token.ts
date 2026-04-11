@@ -120,20 +120,42 @@ export const isSacContractExecutable = async (
     const instance = new Contract(contractId).getFootprint();
     const ledgerKeyContractCode = instance.toXDR("base64");
 
-    const { entries } = await server.getLedgerEntries(
-      xdr.LedgerKey.fromXDR(ledgerKeyContractCode, "base64"),
-    );
-
-    if (entries && entries.length) {
-      const parsed = entries[0].val;
-      const executable = parsed.contractData().val().instance().executable();
-
-      return (
-        executable.switch().name ===
-        xdr.ContractExecutableType.contractExecutableStellarAsset().name
+    try {
+      const { entries } = await server.getLedgerEntries(
+        xdr.LedgerKey.fromXDR(ledgerKeyContractCode, "base64"),
       );
+
+      if (entries && entries.length > 0) {
+        const parsed = entries[0].val;
+        if (typeof parsed?.contractData !== "function") {
+          return false;
+        }
+
+        const scVal = parsed.contractData().val();
+        if (typeof scVal?.instance !== "function") {
+          return false;
+        }
+
+        const instance = scVal.instance();
+        if (typeof instance?.executable !== "function") {
+          return false;
+        }
+
+        const executable = instance.executable();
+        if (typeof executable?.switch !== "function") {
+          return false;
+        }
+
+        return (
+          executable.switch().name ===
+          xdr.ContractExecutableType.contractExecutableStellarAsset().name
+        );
+      }
+    } catch (error) {
+      console.error("Error checking if contract is SAC executable:", error);
+      return false;
     }
-    throw new Error("Contract not found in the ledger entries");
+    return false;
   }
 
   try {

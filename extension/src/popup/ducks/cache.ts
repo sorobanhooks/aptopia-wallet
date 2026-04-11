@@ -59,6 +59,9 @@ interface InitialState {
       AccountBalancesInterface & { updatedAt: number }
     >;
   };
+  formattedBalanceData: {
+    [network: string]: Record<PublicKey, any>;
+  };
   icons: Record<AssetCode, IconUrl>;
   homeDomains: { [network: string]: Record<PublicKey, HomeDomain> };
   tokenLists: AssetListResponse[];
@@ -68,6 +71,9 @@ interface InitialState {
   historyData: {
     [network: string]: Record<PublicKey, HistoryResponse>;
   };
+  resolvedHistory: {
+    [network: string]: Record<PublicKey, any>;
+  };
   tokenPrices: {
     [publicKey: string]: ApiTokenPrices & { updatedAt: number };
   };
@@ -76,11 +82,13 @@ interface InitialState {
 
 const initialState: InitialState = {
   balanceData: {},
+  formattedBalanceData: {},
   icons: {},
   homeDomains: {},
   tokenLists: [],
   tokenDetails: {},
   historyData: {},
+  resolvedHistory: {},
   tokenPrices: {},
   collections: {},
 };
@@ -116,6 +124,30 @@ const cacheSlice = createSlice({
         [action.payload.networkDetails.network]: {
           ...state.historyData[action.payload.networkDetails.network],
           [action.payload.publicKey]: action.payload.history,
+        },
+      };
+    },
+    saveFormattedBalances(
+      state,
+      action: { payload: { publicKey: string; network: string; data: any } },
+    ) {
+      state.formattedBalanceData = {
+        ...state.formattedBalanceData,
+        [action.payload.network]: {
+          ...(state.formattedBalanceData[action.payload.network] || {}),
+          [action.payload.publicKey]: action.payload.data,
+        },
+      };
+    },
+    saveResolvedHistory(
+      state,
+      action: { payload: { publicKey: string; network: string; data: any } },
+    ) {
+      state.resolvedHistory = {
+        ...state.resolvedHistory,
+        [action.payload.network]: {
+          ...(state.resolvedHistory[action.payload.network] || {}),
+          [action.payload.publicKey]: action.payload.data,
         },
       };
     },
@@ -200,12 +232,18 @@ export const selectBalancesByPublicKey = (publicKey: string) =>
   createSelector(balancesSelector, (balances) => balances[publicKey]);
 export const collectionsSelector = (state: { cache: InitialState }) =>
   state.cache.collections;
+export const formattedBalancesSelector = (state: { cache: InitialState }) =>
+  state.cache.formattedBalanceData;
+export const resolvedHistorySelector = (state: { cache: InitialState }) =>
+  state.cache.resolvedHistory;
 
 export const { reducer } = cacheSlice;
 export const {
   clearAll,
   saveBalancesForAccount,
   saveHistoryForAccount,
+  saveFormattedBalances,
+  saveResolvedHistory,
   saveIconsForBalances,
   saveDomainForIssuer,
   saveTokenLists,

@@ -108,18 +108,18 @@ export function useGetSwapFromData(getBalancesOptions: {
         ? balances.filter((balance) => {
             if (
               "token" in balance &&
-              balance.token.code.toLowerCase().includes(term)
+              balance.token.code?.toLowerCase()?.includes(term)
             )
               return true;
             if (
               "token" in balance &&
               "issuer" in balance.token &&
-              balance.token.issuer.key.toLowerCase().includes(term)
+              balance.token.issuer?.key?.toLowerCase()?.includes(term)
             )
               return true;
             if (
               "contractId" in balance &&
-              balance.contractId.toLowerCase().includes(term)
+              balance.contractId?.toLowerCase()?.includes(term)
             )
               return true;
             return false;

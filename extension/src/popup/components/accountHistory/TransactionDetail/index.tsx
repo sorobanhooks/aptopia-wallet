@@ -13,11 +13,35 @@ import { KeyIdenticon } from "popup/components/identicons/KeyIdenticon";
 import { METRIC_NAMES } from "popup/constants/metricsNames";
 
 import { isCustomNetwork } from "@shared/helpers/stellar";
-import {
-  AssetDiffSummary,
-  getActionIconByType,
-  OperationDataRow,
-} from "popup/views/AccountHistory/hooks/useGetHistoryData";
+import { OperationDataRow } from "popup/views/AccountHistory/hooks/useGetHistoryData";
+
+export interface AssetDiffSummary {
+  assetCode: string;
+  assetIssuer: string | null;
+  decimals: number;
+  amount: string;
+  isCredit: boolean;
+  destination?: string;
+  icon?: string;
+  sourcePublicKey?: string;
+  sourceAmount?: string;
+  sourceAssetCode?: string;
+  sourceIcon?: string;
+}
+
+export const getActionIconByType = (iconType: string) => {
+  switch (iconType) {
+    case "sent": return <Icon.ArrowCircleUp />;
+    case "received": return <Icon.ArrowCircleDown />;
+    case "swap": return <Icon.RefreshCcw03 />;
+    case "contractInteraction": return <Icon.FileCode02 />;
+    case "failed": return <Icon.AlertCircle />;
+    case "add": return <Icon.PlusCircle />;
+    case "remove": return <Icon.MinusCircle />;
+    case "generic": return <Icon.CheckCircle />;
+    default: return <></>;
+  }
+};
 import { NetworkDetails } from "@shared/constants/stellar";
 import { getStellarExpertUrl } from "popup/helpers/account";
 import { getMemoDisabledState } from "helpers/muxedAddress";

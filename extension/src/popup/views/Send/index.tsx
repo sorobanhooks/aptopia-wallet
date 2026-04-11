@@ -81,8 +81,8 @@ export const Send = () => {
         }
       : {
           type: "classic" as const,
-          sourceAsset: asset,
-          destAsset: getAssetFromCanonical(destinationAsset || "native"),
+          sourceAsset: asset!,
+          destAsset: getAssetFromCanonical(destinationAsset || "native")!,
           amount,
           destinationAmount,
           allowedSlippage,
@@ -138,11 +138,11 @@ export const Send = () => {
         // based on the type of Send, we need to get the XDR from the appropriate simulation state
         if (isCollectible) {
           if (collectibleSimulationState.state === RequestState.SUCCESS) {
-            xdr = collectibleSimulationState.data.transactionXdr;
+            xdr = collectibleSimulationState.data?.transactionXdr || "";
           }
         } else {
           if (paymentSimulationState.state === RequestState.SUCCESS) {
-            xdr = paymentSimulationState.data.transactionXdr;
+            xdr = paymentSimulationState.data?.transactionXdr || "";
           }
         }
 

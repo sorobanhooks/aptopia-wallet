@@ -20,7 +20,6 @@ import { AccountAssets } from "popup/components/account/AccountAssets";
 import { AccountCollectibles } from "popup/components/account/AccountCollectibles";
 import { AccountHeader } from "popup/components/account/AccountHeader";
 import { useHiddenCollectibles } from "popup/components/account/hooks/useHiddenCollectibles";
-import { Loading } from "popup/components/Loading";
 import { NotFundedMessage } from "popup/components/account/NotFundedMessage";
 import { formatAmount, roundUsdValue } from "popup/helpers/formatters";
 
@@ -107,7 +106,7 @@ export const Account = () => {
     const getData = async () => {
       if (accountBalances && !isScanAppended) {
         // tie refresh history data to account balances requests
-        await fetchHistoryData({ balances: accountBalances });
+        await fetchHistoryData();
       }
     };
     getData();
@@ -130,14 +129,8 @@ export const Account = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [accountBalances]);
 
-  if (
-    accountData.state === RequestState.IDLE ||
-    accountData.state === RequestState.LOADING
-  ) {
-    return <Loading />;
-  }
-
   const hasError = accountData.state === RequestState.ERROR;
+  const isResolved = accountData.data?.type === AppDataType.RESOLVED;
 
   if (accountData.data?.type === AppDataType.REROUTE) {
     if (accountData.data.shouldOpenTab) {
@@ -153,15 +146,15 @@ export const Account = () => {
     );
   }
 
-  if (!hasError) {
+  if (!hasError && isResolved) {
     reRouteOnboarding({
-      type: accountData.data.type,
-      applicationState: accountData.data?.applicationState,
+      type: accountData.data!.type,
+      applicationState: accountData.data!.applicationState,
       state: accountData.state,
     });
   }
 
-  const resolvedData = accountData.data;
+  const resolvedData = isResolved ? accountData.data : null;
   const resolvedIcons =
     iconsData?.state === IconsRequestState.SUCCESS &&
     iconsData?.data?.type === AppDataType.RESOLVED
@@ -173,8 +166,9 @@ export const Account = () => {
   const totalBalanceUsd = getTotalUsd(tokenPrices, balances);
   const roundedTotalBalanceUsd =
     !hasError &&
-    isMainnet(resolvedData!.networkDetails) &&
-    resolvedData?.tokenPrices
+    resolvedData && 
+    isMainnet(resolvedData.networkDetails) &&
+    resolvedData.tokenPrices
       ? `$${formatAmount(roundUsdValue(totalBalanceUsd.toString()))}`
       : "";
 
@@ -284,12 +278,14 @@ export const Account = () => {
           />
         </div>
       </View.Content>
-      {!resolvedData?.balances?.isFunded &&
+      {isResolved && 
+        !resolvedData?.balances?.isFunded &&
         !hasError &&
         !resolvedData?.balances?.error?.horizon && (
           <View.Footer>
             <NotFundedMessage
               canUseFriendbot={!!resolvedData!.networkDetails.friendbotUrl}
+              friendbotUrl={resolvedData!.networkDetails.friendbotUrl}
               publicKey={resolvedData?.publicKey || ""}
               reloadBalances={() =>
                 fetchData({

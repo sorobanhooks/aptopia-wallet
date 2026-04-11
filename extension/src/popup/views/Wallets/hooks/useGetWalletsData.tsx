@@ -2,6 +2,7 @@ import { useReducer } from "react";
 import { captureException } from "@sentry/browser";
 import { Account } from "@shared/api/types";
 import { initialState, isError, reducer } from "helpers/request";
+import { RequestState } from "constants/request";
 import {
   AppDataType,
   NeedsReRoute,
@@ -105,7 +106,9 @@ function useGetWalletsData() {
   };
 
   const fetchData = async (useCache = false) => {
-    dispatch({ type: "FETCH_DATA_START" });
+    if (state.state !== RequestState.SUCCESS) {
+      dispatch({ type: "FETCH_DATA_START" });
+    }
     try {
       const appData = await fetchAppData(true);
       if (isError(appData)) {

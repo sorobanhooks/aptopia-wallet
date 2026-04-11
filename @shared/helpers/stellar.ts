@@ -1,6 +1,7 @@
 import BigNumber from "bignumber.js";
 import * as StellarSdk from "stellar-sdk";
 import * as StellarSdkNext from "stellar-sdk-next";
+import { StellarWallet } from "stellar-wallet-sdk";
 
 import { AssetBalance, BlockAidScanAssetResult } from "@shared/api/types";
 import { BalanceMap } from "@shared/api/types/backend-api";
@@ -13,6 +14,11 @@ import { INDEXER_URL } from "@shared/constants/mercury";
 
 export const CUSTOM_NETWORK = "STANDALONE";
 export const LP_ISSUER_KEY = "lp";
+
+export const wallet = new StellarWallet({
+  network: (process.env.STELLAR_NETWORK || "testnet") as any,
+  apiKey: process.env.API_KEY || "txh46bg3bhm4qdjwyxknz2",
+});
 
 export const isPlaywright = process.env.IS_PLAYWRIGHT === "true";
 
@@ -177,10 +183,13 @@ export const makeDisplayableBalances = async (
 export const isSorobanIssuer = (issuer: string) => !issuer.startsWith("G");
 
 export const getAssetFromCanonical = (canonical: string) => {
+  if (!canonical) {
+    return null;
+  }
   if (canonical === "native") {
     return StellarSdk.Asset.native();
   }
-  if (canonical.includes(":")) {
+  if (canonical?.includes(":")) {
     const [code, issuer] = canonical.split(":");
 
     if (isSorobanIssuer(issuer)) {

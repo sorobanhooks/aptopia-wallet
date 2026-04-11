@@ -1,50 +1,29 @@
-import { Store } from "redux";
+import { wallet as sdkWallet } from "@shared/helpers/stellar";
+
 
 import {
   SignFreighterSorobanTransactionMessage,
   SignFreighterTransactionMessage,
 } from "@shared/api/types/message-request";
-import { getSdk } from "@shared/helpers/stellar";
-import { DataStorageAccess } from "background/helpers/dataStorageAccess";
-import { getEncryptedTemporaryData } from "background/helpers/session";
-import { KEY_ID } from "constants/localStorageTypes";
-import { captureException } from "@sentry/browser";
-
 export const signFreighterTransaction = async ({
   request,
-  localStore,
-  sessionStore,
 }: {
   request:
     | SignFreighterTransactionMessage
     | SignFreighterSorobanTransactionMessage;
-  localStore: DataStorageAccess;
-  sessionStore: Store;
 }) => {
-  const { transactionXDR, network } = request;
+  const { transactionXDR } = request;
 
-  const Sdk = getSdk(network);
 
-  const transaction = Sdk.TransactionBuilder.fromXDR(transactionXDR, network);
-  const keyId = (await localStore.getItem(KEY_ID)) || "";
-  let privateKey = "";
+  // ── Preferred path: Use Stellar Wallet SDK ────────────────────────
+  // The SDK uses its internal signing key set during restore() or import()
   try {
-    privateKey = await getEncryptedTemporaryData({
-      localStore,
-      sessionStore,
-      keyName: keyId,
-    });
-  } catch (e) {
-    captureException(
-      `Sign freighter transaction: No private key found: ${JSON.stringify(e)}`,
-    );
+    const signedTransaction = await sdkWallet.signXDR(transactionXDR);
+    return { signedTransaction };
+  } catch (sdkError: any) {
+    console.error("SDK signing failed:", sdkError);
+    return { error: sdkError.message || "Signing failed" };
   }
-
-  if (privateKey.length) {
-    const sourceKeys = Sdk.Keypair.fromSecret(privateKey);
-    transaction.sign(sourceKeys);
-    return { signedTransaction: transaction.toXDR() };
-  }
-
-  return { error: "Session timed out" };
 };
+
+

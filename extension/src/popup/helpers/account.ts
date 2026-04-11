@@ -2,7 +2,6 @@ import { Federation, Horizon, MuxedAccount } from "stellar-sdk";
 import { BigNumber } from "bignumber.js";
 import {
   Account,
-  AssetIcons,
   AssetVisibility,
   HorizonOperation,
   IssuerKey,
@@ -15,7 +14,6 @@ import { SorobanTokenInterface } from "@shared/constants/soroban/token";
 export { isSorobanIssuer } from "@shared/helpers/stellar";
 
 import {
-  getAssetFromCanonical,
   getCanonicalFromAsset,
   isFederationAddress,
   isMuxedAccount,
@@ -23,13 +21,6 @@ import {
 } from "helpers/stellar";
 import { getAttrsFromSorobanHorizonOp } from "./soroban";
 import { isAssetVisible } from "./settings";
-import {
-  getRowDataByOpType,
-  OperationDataRow,
-  getOperationDependencies,
-} from "popup/views/AccountHistory/hooks/useGetHistoryData";
-import { TokenDetailsResponse } from "helpers/hooks/useTokenDetails";
-import { AssetListResponse } from "@shared/constants/soroban/asset-list";
 
 export const LP_IDENTIFIER = ":lp";
 
@@ -105,137 +96,12 @@ export const getIsCreateClaimableBalanceSpam = (
   return false;
 };
 
-interface SortOperationsByAsset {
-  operations: HorizonOperation[];
-  balances: AssetType[];
-  networkDetails: NetworkDetails;
-  publicKey: string;
-  fetchTokenDetails: (args: {
-    contractId: string;
-    publicKey: string;
-    networkDetails: NetworkDetails;
-  }) => Promise<TokenDetailsResponse | Error>;
-  icons: AssetIcons;
-  homeDomains: { [assetIssuer: string]: string | null };
-  cachedTokenLists: AssetListResponse[];
-}
-
 export interface AssetOperations {
-  [key: string]: OperationDataRow[];
+  [key: string]: any[];
 }
 
-export const sortOperationsByAsset = async ({
-  balances,
-  operations,
-  networkDetails,
-  publicKey,
-  fetchTokenDetails,
-  icons,
-  homeDomains,
-  cachedTokenLists,
-}: SortOperationsByAsset) => {
-  const assetOperationMap = {} as AssetOperations;
-
-  balances.forEach((bal) => {
-    if ("token" in bal) {
-      const issuer =
-        bal.token !== undefined && "issuer" in bal.token
-          ? bal.token.issuer.key
-          : "";
-      const code =
-        bal.token !== undefined && "code" in bal.token ? bal.token.code : "";
-      assetOperationMap[getCanonicalFromAsset(code, issuer)] = [];
-    }
-    if ("contractId" in bal && "symbol" in bal) {
-      assetOperationMap[
-        getCanonicalFromAsset(bal.symbol, bal.contractId || "")
-      ] = [];
-    }
-  });
-
-  /* 
-    To prevent multiple requests for home domains as we build each row, 
-    we iterate through the operations and collect the asset issuers that need home domains in a single request.
-    Also collect and fetch needed collectible contracts.
-  */
-  const { homeDomains: fetchedHomeDomains, collectibleLookup } =
-    await getOperationDependencies(
-      operations,
-      networkDetails,
-      publicKey,
-      homeDomains,
-    );
-
-  for (const op of operations) {
-    const isPayment = getIsPayment(op.type);
-    const isSwap = getIsSwap(op);
-    const isCreateExternalAccount =
-      op.type === Horizon.HorizonApi.OperationResponseType.createAccount &&
-      op.account !== publicKey;
-    const isDustPayment = getIsDustPayment(publicKey, op);
-
-    const parsedOperation = {
-      ...op,
-      isPayment,
-      isSwap,
-      isDustPayment,
-      isCreateExternalAccount,
-    };
-
-    const opRowData = await getRowDataByOpType(
-      publicKey,
-      balances,
-      parsedOperation,
-      networkDetails,
-      icons,
-      fetchTokenDetails,
-      fetchedHomeDomains,
-      collectibleLookup,
-      cachedTokenLists,
-    );
-    if (getIsPayment(op.type)) {
-      Object.keys(assetOperationMap).forEach((assetKey) => {
-        const asset = getAssetFromCanonical(assetKey);
-        const assetCode = asset.code === "XLM" ? "native" : asset.code;
-        const assetIssuer = asset.issuer;
-
-        if (
-          ("asset_code" in op &&
-            "asset_issuer" in op &&
-            op.asset_code === assetCode &&
-            op.asset_issuer === assetIssuer) ||
-          ("asset_type" in op && op.asset_type === assetCode)
-        ) {
-          assetOperationMap[assetKey].push(opRowData);
-        } else if ("source_asset_type" in op || "source_asset_code" in op) {
-          if (
-            ("source_asset_type" in op && op.source_asset_type === assetCode) ||
-            (op.source_asset_code === assetCode &&
-              "source_asset_issuer" in op &&
-              op.source_asset_issuer === assetIssuer)
-          ) {
-            assetOperationMap[assetKey].push(opRowData);
-          }
-        }
-      });
-    }
-
-    if (getIsSupportedSorobanOp(op, networkDetails)) {
-      Object.keys(assetOperationMap).forEach((assetKey) => {
-        const asset = getAssetFromCanonical(assetKey);
-        const attrs = getAttrsFromSorobanHorizonOp(op, networkDetails);
-        if (
-          attrs &&
-          op.source_account === publicKey &&
-          asset.issuer === attrs.contractId
-        ) {
-          assetOperationMap[assetKey].push(opRowData);
-        }
-      });
-    }
-  }
-
-  return assetOperationMap;
+export const sortOperationsByAsset = async () => {
+  return {} as AssetOperations;
 };
 
 export const getStellarExpertUrl = (networkDetails: NetworkDetails) =>

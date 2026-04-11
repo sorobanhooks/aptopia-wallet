@@ -135,11 +135,13 @@ export const SendingTransaction = ({
     submissionState.state === RequestState.IDLE ||
     submissionState.state === RequestState.LOADING;
   const isSuccess = submissionState.state === RequestState.SUCCESS;
-  const assetIcon = icons[asset]!;
-  const assetIcons = asset !== "native" ? { [asset]: assetIcon } : {};
-  const dstAssetIcon = icons[destinationAsset]!;
+  const assetIcon = icons[asset] || "";
+  const assetIcons = asset !== "native" && assetIcon ? { [asset]: assetIcon } : {};
+  const dstAssetIcon = destinationAsset ? icons[destinationAsset] || "" : "";
   const dstAssetIcons =
-    destinationAsset !== "native" ? { [destinationAsset]: dstAssetIcon } : {};
+    destinationAsset && destinationAsset !== "native" && dstAssetIcon
+      ? { [destinationAsset]: dstAssetIcon }
+      : {};
 
   if (
     submitAccountState.state == RequestState.IDLE ||
@@ -150,7 +152,7 @@ export const SendingTransaction = ({
 
   const summaryDescriptionLabel = isCollectible
     ? collectibleData.name
-    : `${amount} ${srcAsset.code} `;
+    : `${amount} ${srcAsset?.code || ""} `;
 
   return (
     <>
@@ -261,8 +263,8 @@ export const SendingTransaction = ({
                 ) : (
                   <AssetIcon
                     assetIcons={assetIcons}
-                    code={srcAsset.code}
-                    issuerKey={srcAsset.issuer}
+                    code={srcAsset?.code || ""}
+                    issuerKey={srcAsset?.issuer || ""}
                     icon={assetIcon}
                     isSuspicious={false}
                   />

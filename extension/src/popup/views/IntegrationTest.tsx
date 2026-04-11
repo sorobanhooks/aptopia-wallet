@@ -2,6 +2,7 @@ import React, { useState, useEffect } from "react";
 import { Networks } from "stellar-sdk";
 import { useTranslation } from "react-i18next";
 
+
 import {
   createAccount,
   changeNetwork,
@@ -131,7 +132,6 @@ export const IntegrationTest = () => {
       runAsserts("fundAccount", () => {});
 
       res = await addAccount({
-        activePublicKey: testPublicKey,
         password: testPassword,
       });
       runAsserts("addAccount", () => {
@@ -449,9 +449,53 @@ export const IntegrationTest = () => {
     runTests();
   }, []);
 
+  const [passwordInput, setPasswordInput] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [status, setStatus] = useState("");
+
+  const getDisplayMessage = (err: any) => {
+    if (err instanceof Error) return err.message;
+    return String(err);
+  };
+
+  const handleAddAccount = async () => {
+    if (!passwordInput.trim()) {
+      setStatus("Please enter your password to add account");
+      return;
+    }
+    setLoading(true);
+    setStatus("");
+    try {
+      await addAccount({ password: passwordInput });
+      setStatus("Account added");
+    } catch (err) {
+      setStatus(`Error: ${getDisplayMessage(err)}`);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const { t } = useTranslation();
+
   return (
-    <div>
+    <div style={{ padding: "20px" }}>
+      <h2>SDK Wallet Integration Test</h2>
+      <div style={{ marginBottom: "20px" }}>
+        <input
+          type="password"
+          value={passwordInput}
+          onChange={(e) => setPasswordInput(e.target.value)}
+          placeholder="Enter password"
+          style={{ marginRight: "10px", padding: "5px" }}
+        />
+        <button onClick={handleAddAccount} disabled={loading}>
+          {loading ? "Adding..." : "Add Account via SDK"}
+        </button>
+        {status && <div style={{ marginTop: "10px" }}>{status}</div>}
+      </div>
+
+      <hr />
+
       <div>{t("Running integration tests ...")}</div>
       <div>{isDone ? t("Done") : ""}</div>
     </div>

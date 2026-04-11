@@ -29,7 +29,7 @@ export const sendMessageToContentScript = (msg: Msg): Promise<Response> => {
 
   window.postMessage(
     { source: EXTERNAL_MSG_REQUEST, messageId: MESSAGE_ID, ...msg },
-    window.location.origin
+    window.location.origin,
   );
   return new Promise((resolve) => {
     let requestTimeout = 0 as any;
@@ -72,16 +72,43 @@ export const sendMessageToContentScript = (msg: Msg): Promise<Response> => {
 };
 
 export const sendMessageToBackground = async (msg: Msg): Promise<Response> => {
-  let res;
-
   if (DEV_SERVER) {
     // treat this as an external call because we're making the call from the browser, not the popup
-    res = await sendMessageToContentScript(msg);
-  } else {
-    res = (await browser.runtime.sendMessage(msg)) as Response;
+    return sendMessageToContentScript(msg) as Promise<Response>;
   }
 
-  return res as Response;
+  // The background service worker may not be ready immediately when the popup
+  // opens (especially on first load after install/update). Chrome will throw
+  // "Could not establish connection. Receiving end does not exist." in that
+  // case. We retry a few times with increasing delays to ride out the race.
+  const MAX_RETRIES = 3;
+  const BASE_DELAY_MS = 300;
+
+  for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+    try {
+      const res = (await browser.runtime.sendMessage(msg)) as Response;
+      return res as Response;
+    } catch (error) {
+      const errorMessage =
+        error instanceof Error ? error.message : String(error);
+      const isConnectionError =
+        errorMessage.includes("Could not establish connection") ||
+        errorMessage.includes("Receiving end does not exist");
+
+      if (isConnectionError && attempt < MAX_RETRIES) {
+        // Wait before retrying — give the background script time to start
+        await new Promise((resolve) =>
+          setTimeout(resolve, BASE_DELAY_MS * (attempt + 1)),
+        );
+        continue;
+      }
+
+      throw error;
+    }
+  }
+
+  // Should never reach here, but TypeScript needs it
+  throw new Error("Failed to send message to background after retries");
 };
 
 export const FreighterApiNodeError = {

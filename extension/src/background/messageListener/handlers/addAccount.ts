@@ -1,5 +1,5 @@
 import { Store } from "redux";
-import StellarHDWallet from "stellar-hd-wallet";
+import { wallet as sdkWallet } from "@shared/helpers/stellar";
 
 import { AddAccountMessage } from "@shared/api/types/message-request";
 import {
@@ -10,23 +10,17 @@ import {
 import { DataStorageAccess } from "background/helpers/dataStorageAccess";
 import {
   KEY_DERIVATION_NUMBER_ID,
-  KEY_ID,
   TEMPORARY_STORE_EXTRA_ID,
 } from "constants/localStorageTypes";
 import { loginToAllAccounts } from "../helpers/login-all-accounts";
 import { KeyManager } from "@stellar/typescript-wallet-sdk-km";
 import { captureException } from "@sentry/browser";
-import { getIsHardwareWalletActive } from "background/helpers/account";
-import { getNonHwKeyID } from "../helpers/get-non-hw-key-id";
-import { unlockKeystore } from "../helpers/unlock-keystore";
 import { storeAccount } from "../helpers/store-account";
 import {
   allAccountsSelector,
   buildHasPrivateKeySelector,
   publicKeySelector,
 } from "background/ducks/session";
-
-const { fromMnemonic } = StellarHDWallet;
 
 export const addAccount = async ({
   request,
@@ -73,36 +67,35 @@ export const addAccount = async ({
     }
   }
 
-  const keyID = (await getIsHardwareWalletActive({ localStore }))
-    ? await getNonHwKeyID({ localStore })
-    : (await localStore.getItem(KEY_ID)) || "";
-
-  // if the session is active, confirm that the password is correct and the hashkey properly unlocks
-  let activePrivateKey = "";
+  // Verify password using SDK wallet
   try {
-    await unlockKeystore({ keyID, password, keyManager });
-    activePrivateKey = await getEncryptedTemporaryData({
-      sessionStore,
-      localStore,
-      keyName: keyID,
-    });
+    await sdkWallet.restore(password);
   } catch (e) {
-    console.error(e);
+    console.error("SDK Password verification failed: ", e);
     return { error: "Incorrect password" };
   }
 
-  if (!activePrivateKey) {
-    captureException("Error decrypting active private key in Add Account");
-    return { error: "Incorrect password" };
+  // Use ONLY StellarWallet SDK (Kit) to add the account and get the public key
+  let newPublicKey = "";
+  try {
+    if (!sdkWallet.canAddAccount()) {
+      return { 
+        error: "Cannot derive new account: This wallet was imported via secret key and does not have a recovery phrase stored. Please use 'Import Account' instead." 
+      };
+    }
+    newPublicKey = await sdkWallet.addAccount(password);
+  } catch (e: any) {
+    console.error("SDK Account derivation error: ", e);
+    return { error: `Error deriving account: ${e.message}` };
   }
 
-  const wallet = fromMnemonic(mnemonicPhrase);
-  const keyNumber =
-    Number(await localStore.getItem(KEY_DERIVATION_NUMBER_ID)) + 1;
+  // Retrieve the secret key directly from the SDK's internal state for legacy storeAccount compatibility
+  const privateKey = (sdkWallet as any).keypairs.get(newPublicKey).secret();
 
+  // Ensure derived keys are consistent between SDK and legacy store
   const keyPair = {
-    publicKey: wallet.getPublicKey(keyNumber),
-    privateKey: wallet.getSecret(keyNumber),
+    publicKey: newPublicKey,
+    privateKey: privateKey,
   };
 
   // Add the new account to our data store
@@ -121,8 +114,10 @@ export const addAccount = async ({
     return { error: "Error adding account" };
   }
 
-  const keyId = keyNumber.toString();
-  await localStore.setItem(KEY_DERIVATION_NUMBER_ID, keyId);
+  const newKeyDerivationNumber =
+    Number(await localStore.getItem(KEY_DERIVATION_NUMBER_ID)) + 1;
+  const keyDerivationNumberId = newKeyDerivationNumber.toString();
+  await localStore.setItem(KEY_DERIVATION_NUMBER_ID, keyDerivationNumberId);
 
   const currentState = sessionStore.getState();
   const hasPrivateKeySelector = buildHasPrivateKeySelector(localStore);

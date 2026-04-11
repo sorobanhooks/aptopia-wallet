@@ -21,21 +21,13 @@ jest.mock("background/helpers/account", () => ({
   }),
 }));
 
-jest.mock("@shared/helpers/stellar", () => {
-  const signResult = Buffer.from("signed-blob");
-  return {
-    getSdk: jest.fn().mockReturnValue({
-      Keypair: {
-        fromSecret: () => ({
-          publicKey: () =>
-            "GBTYAFHGNZSTE4VBWZYAGB3SRGJEPTI5I4Y22KZ4JTVAN56LESB6JZOF",
-          sign: jest.fn().mockReturnValue(signResult),
-        }),
-      },
-    }),
-    isPlaywright: false,
-  };
-});
+jest.mock("@shared/helpers/stellar", () => ({
+  wallet: {
+    setNetworkConfig: jest.fn(),
+    selectAccount: jest.fn(),
+    signMessage: jest.fn().mockReturnValue("signed-blob-base64"),
+  },
+}));
 
 jest.mock("@sentry/browser", () => ({
   captureException: jest.fn(),
@@ -45,14 +37,6 @@ jest.mock("helpers/stellar", () => ({
   encodeSep53Message: jest.fn((msg: string) => Buffer.from(msg)),
 }));
 
-const mockLocalStore = {
-  getItem: jest.fn().mockResolvedValue("mock-key-id"),
-  setItem: jest.fn(),
-  remove: jest.fn(),
-  clear: jest.fn(),
-} as any;
-
-const mockSessionStore = {} as any;
 
 const makeBlobData = (uuid: string) => ({
   blob: {
@@ -102,8 +86,6 @@ describe("signBlob handler", () => {
 
     await signBlob({
       request,
-      localStore: mockLocalStore,
-      sessionStore: mockSessionStore,
       blobQueue,
       responseQueue,
     });
@@ -129,8 +111,6 @@ describe("signBlob handler", () => {
 
     const result = await signBlob({
       request,
-      localStore: mockLocalStore,
-      sessionStore: mockSessionStore,
       blobQueue,
       responseQueue,
     });
@@ -156,8 +136,6 @@ describe("signBlob handler", () => {
 
     const result = await signBlob({
       request,
-      localStore: mockLocalStore,
-      sessionStore: mockSessionStore,
       blobQueue,
       responseQueue,
     });
@@ -186,8 +164,6 @@ describe("signBlob handler", () => {
 
     await signBlob({
       request,
-      localStore: mockLocalStore,
-      sessionStore: mockSessionStore,
       blobQueue,
       responseQueue,
     });
@@ -214,8 +190,6 @@ describe("signBlob handler", () => {
 
     await signBlob({
       request,
-      localStore: mockLocalStore,
-      sessionStore: mockSessionStore,
       blobQueue,
       responseQueue,
     });
@@ -235,8 +209,6 @@ describe("signBlob handler", () => {
 
     const result = await signBlob({
       request,
-      localStore: mockLocalStore,
-      sessionStore: mockSessionStore,
       blobQueue,
       responseQueue,
     });

@@ -19,11 +19,11 @@ export const reducer = <T, K>(
 ): State<T, K> => {
   switch (action.type) {
     case "FETCH_DATA_START":
-      return { state: RequestState.LOADING, error: null, data: null };
+      return { ...state, state: RequestState.LOADING, error: null };
     case "FETCH_DATA_SUCCESS":
       return { error: null, state: RequestState.SUCCESS, data: action.payload };
     case "FETCH_DATA_ERROR":
-      return { data: null, state: RequestState.ERROR, error: action.payload };
+      return { ...state, state: RequestState.ERROR, error: action.payload };
     default:
       return state;
   }

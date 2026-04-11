@@ -62,6 +62,10 @@ import { AccountMigration } from "popup/views/AccountMigration";
 import { AddFunds } from "popup/views/AddFunds";
 import { Discover } from "popup/views/Discover";
 import { Wallets } from "popup/views/Wallets";
+import { Dashboard } from "popup/views/Dashboard";
+import { AgentConfig } from "popup/views/AgentConfig";
+import { ActivityLog } from "popup/views/ActivityLog";
+import { ConfirmTrade } from "popup/views/ConfirmTrade";
 
 import { DEV_SERVER } from "@shared/constants/services";
 import { SettingsState } from "@shared/api/types";
@@ -277,6 +281,10 @@ export const Router = () => (
         <Route path={ROUTES.addFunds} element={<AddFunds />} />
         <Route path={ROUTES.discover} element={<Discover />} />
         <Route path={ROUTES.wallets} element={<Wallets />} />
+        <Route path={ROUTES.dashboard} element={<Dashboard />} />
+        <Route path={ROUTES.agentConfig} element={<AgentConfig />} />
+        <Route path={ROUTES.activityLog} element={<ActivityLog />} />
+        <Route path={ROUTES.confirmTrade} element={<ConfirmTrade />} />
 
         {DEV_SERVER && (
           <>

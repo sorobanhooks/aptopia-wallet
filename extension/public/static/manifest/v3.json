@@ -9,8 +9,7 @@
     }
   },
   "background": {
-    "service_worker": "background.min.js",
-    "scripts": ["background.min.js"]
+    "service_worker": "background.min.js"
   },
   "content_scripts": [
     {

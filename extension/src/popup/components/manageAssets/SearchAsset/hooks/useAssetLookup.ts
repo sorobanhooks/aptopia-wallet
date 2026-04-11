@@ -180,11 +180,16 @@ const useAssetLookup = () => {
         signal,
       });
 
-      const isSacContract = await isSacContractExecutable(
-        contractId,
-        networkDetails,
-        signal,
-      );
+      let isSacContract = false;
+      try {
+        isSacContract = await isSacContractExecutable(
+          contractId,
+          networkDetails,
+          signal,
+        );
+      } catch (e) {
+        console.error("Error checking if contract is SAC executable:", e);
+      }
 
       if (!tokenDetailsResponse) {
         assetRows = [];

@@ -246,12 +246,23 @@ export const KeyValueClaimants = ({ claimants }: { claimants: Claimant[] }) => {
     predicate: xdr.ClaimPredicate,
     hideKey: boolean = false,
   ): React.ReactNode {
-    switch (predicate.switch().name) {
+    if (!predicate || typeof predicate.switch !== "function") {
+      return <></>;
+    }
+    const predicateType = predicate.switch();
+    if (!predicateType) {
+      return <></>;
+    }
+    switch (predicateType.name) {
       case "claimPredicateUnconditional": {
         return (
           <KeyValueList
             operationKey={hideKey ? "" : t("Predicate")}
-            operationValue={CLAIM_PREDICATES[predicate.switch().name]}
+            operationValue={
+              typeof predicate.switch === "function"
+                ? CLAIM_PREDICATES[predicate.switch().name]
+                : ""
+            }
           />
         );
       }
@@ -335,7 +346,12 @@ export const KeyValueClaimants = ({ claimants }: { claimants: Claimant[] }) => {
     <>
       {claimants.map((claimant, i) => (
         <React.Fragment
-          key={claimant.destination + claimant.predicate.switch().name}
+          key={
+            claimant.destination +
+            (typeof claimant.predicate?.switch === "function"
+              ? claimant.predicate.switch().name
+              : "")
+          }
         >
           <KeyValueWithPublicKey
             operationKey={t(`Destination #${i + 1}`)}
@@ -474,6 +490,9 @@ export const KeyValueInvokeHostFn = ({
   const hostfn = op.func;
 
   function renderDetails() {
+    if (typeof hostfn?.switch !== "function") {
+      return <></>;
+    }
     switch (hostfn.switch()) {
       case xdr.HostFunctionType.hostFunctionTypeCreateContractV2():
       case xdr.HostFunctionType.hostFunctionTypeCreateContract(): {
@@ -481,19 +500,65 @@ export const KeyValueInvokeHostFn = ({
         const preimage = createContractArgs.contractIdPreimage;
         const executable = createContractArgs.executable;
         const createV2Args = createContractArgs.constructorArgs;
+        
+        if (!executable || typeof executable.switch !== "function") {
+          return <></>;
+        }
         const executableType = executable.switch().name;
         const wasmHash = executable.wasmHash();
 
-        if (preimage.switch().name === "contractIdPreimageFromAddress") {
+        if (preimage && typeof preimage.switch === "function" && preimage.switch().name === "contractIdPreimageFromAddress") {
           const preimageFromAddress = preimage.fromAddress();
           const address = preimageFromAddress.address();
           const salt = preimageFromAddress.salt().toString("hex");
 
-          const addressType = address.switch();
-          if (addressType.name === "scAddressTypeAccount") {
-            const accountId = StrKey.encodeEd25519PublicKey(
-              address.accountId().ed25519(),
-            );
+          if (address && typeof address.switch === "function") {
+            const addressType = address.switch();
+            if (addressType.name === "scAddressTypeAccount") {
+              const accountId = StrKey.encodeEd25519PublicKey(
+                address.accountId().ed25519(),
+              );
+              return (
+                <>
+                  <KeyValueList
+                    operationKey={t("Type")}
+                    operationValue={t("Create Contract")}
+                  />
+                  <KeyValueWithPublicKey
+                    operationKey={t("Account ID")}
+                    operationValue={accountId}
+                  />
+                  <KeyValueList
+                    operationKey={t("Salt")}
+                    operationValue={
+                      <CopyValue
+                        value={salt}
+                        displayValue={truncateString(salt, 8)}
+                      />
+                    }
+                  />
+                  <KeyValueList
+                    operationKey={t("Executable Type")}
+                    operationValue={executableType}
+                  />
+                  {executable.wasmHash() && (
+                    <KeyValueList
+                      operationKey={t("Executable Wasm Hash")}
+                      operationValue={
+                        <CopyValue
+                          value={wasmHash.toString("hex")}
+                          displayValue={truncateString(
+                            wasmHash.toString("hex"),
+                            8,
+                          )}
+                        />
+                      }
+                    />
+                  )}
+                </>
+              );
+            }
+            const contractId = addressToString(address);
             return (
               <>
                 <KeyValueList
@@ -501,16 +566,13 @@ export const KeyValueInvokeHostFn = ({
                   operationValue={t("Create Contract")}
                 />
                 <KeyValueWithPublicKey
-                  operationKey={t("Account ID")}
-                  operationValue={accountId}
+                  operationKey={t("Contract ID")}
+                  operationValue={contractId}
                 />
                 <KeyValueList
                   operationKey={t("Salt")}
                   operationValue={
-                    <CopyValue
-                      value={salt}
-                      displayValue={truncateString(salt, 8)}
-                    />
+                    <CopyValue value={salt} displayValue={truncateString(salt, 8)} />
                   }
                 />
                 <KeyValueList
@@ -523,58 +585,26 @@ export const KeyValueInvokeHostFn = ({
                     operationValue={
                       <CopyValue
                         value={wasmHash.toString("hex")}
-                        displayValue={truncateString(
-                          wasmHash.toString("hex"),
-                          8,
-                        )}
+                        displayValue={truncateString(wasmHash.toString("hex"), 8)}
                       />
                     }
                   />
                 )}
+                {createV2Args && <KeyValueInvokeHostFnArgs args={createV2Args} />}
               </>
             );
           }
-          const contractId = addressToString(address);
-          return (
-            <>
-              <KeyValueList
-                operationKey={t("Type")}
-                operationValue={t("Create Contract")}
-              />
-              <KeyValueWithPublicKey
-                operationKey={t("Contract ID")}
-                operationValue={contractId}
-              />
-              <KeyValueList
-                operationKey={t("Salt")}
-                operationValue={
-                  <CopyValue
-                    value={salt}
-                    displayValue={truncateString(salt, 8)}
-                  />
-                }
-              />
-              <KeyValueList
-                operationKey={t("Executable Type")}
-                operationValue={executableType}
-              />
-              {executable.wasmHash() && (
-                <KeyValueList
-                  operationKey={t("Executable Wasm Hash")}
-                  operationValue={
-                    <CopyValue
-                      value={wasmHash.toString("hex")}
-                      displayValue={truncateString(wasmHash.toString("hex"), 8)}
-                    />
-                  }
-                />
-              )}
-              {createV2Args && <KeyValueInvokeHostFnArgs args={createV2Args} />}
-            </>
-          );
         }
 
         // contractIdPreimageFromAsset
+        if (
+          !preimage ||
+          typeof preimage.fromAsset !== "function" ||
+          typeof preimage.switch !== "function" ||
+          preimage.switch().name !== "contractIdPreimageFromAsset"
+        ) {
+          return <></>;
+        }
         const preimageFromAsset = preimage.fromAsset();
         const preimageValue = preimageFromAsset.value()!;
 
@@ -584,8 +614,10 @@ export const KeyValueInvokeHostFn = ({
               operationKey={t("Type")}
               operationValue={t("Create Contract")}
             />
-            {preimageFromAsset.switch().name === "assetTypeCreditAlphanum4" ||
-            preimageFromAsset.switch().name === "assetTypeCreditAlphanum12" ? (
+            {preimageFromAsset &&
+            typeof preimageFromAsset.switch === "function" &&
+            (preimageFromAsset.switch().name === "assetTypeCreditAlphanum4" ||
+              preimageFromAsset.switch().name === "assetTypeCreditAlphanum12") ? (
               <>
                 <KeyValueList
                   operationKey={t("Asset Code")}

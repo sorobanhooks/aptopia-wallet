@@ -39,6 +39,7 @@ import { openTab } from "popup/helpers/navigate";
 import { useSetupSigningFlow } from "popup/helpers/useSetupSigningFlow";
 import { rejectTransaction, signBlob } from "popup/ducks/access";
 import { publicKeySelector } from "popup/ducks/accountServices";
+import { ROUTES } from "popup/constants/routes";
 import { reRouteOnboarding } from "popup/helpers/route";
 import { getSiteFavicon } from "popup/helpers/getSiteFavicon";
 import { KeyIdenticon } from "popup/components/identicons/KeyIdenticon";
@@ -64,6 +65,8 @@ export const SignMessage = () => {
   const [activePaneIndex, setActivePaneIndex] = useState(0);
 
   const message = parsedSearchParam(location.search) as MessageToSign;
+  
+
   const {
     apiVersion,
     accountToSign,
@@ -108,6 +111,10 @@ export const SignMessage = () => {
     getData();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  if (!message || !message.uuid || !message.message) {
+    return <Navigate to={ROUTES.account} replace />;
+  }
 
   const isLoading =
     signMessageState.state === RequestState.IDLE ||

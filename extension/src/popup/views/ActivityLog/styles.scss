@@ -1,0 +1,120 @@
+@use "popup/styles/utils.scss" as *;
+
+.ActivityLog {
+  &__loading {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    min-height: pxToRem(200px);
+  }
+
+  &__empty {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: pxToRem(48px) pxToRem(24px);
+    text-align: center;
+    gap: pxToRem(16px);
+    color: var(--sds-clr-gray-09);
+
+    svg {
+      width: pxToRem(48px);
+      height: pxToRem(48px);
+      color: var(--sds-clr-gray-06);
+    }
+  }
+
+  &__list {
+    display: flex;
+    flex-direction: column;
+    gap: pxToRem(12px);
+    padding-bottom: pxToRem(32px);
+  }
+
+  &__item {
+    display: flex;
+    gap: pxToRem(16px);
+    padding: pxToRem(16px);
+    background: var(--sds-clr-gray-02);
+    border: 1px solid var(--sds-clr-gray-06);
+    border-radius: pxToRem(12px);
+
+    &__content {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      gap: pxToRem(4px);
+    }
+
+    &__row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    &__title {
+      font-size: pxToRem(14px);
+      font-weight: var(--sds-fw-semi-bold);
+      color: var(--sds-clr-gray-12);
+    }
+
+    &__status {
+      font-size: pxToRem(11px);
+      font-weight: var(--sds-fw-bold);
+      text-transform: uppercase;
+      padding: pxToRem(2px) pxToRem(8px);
+      border-radius: pxToRem(4px);
+
+      &--success {
+        background: var(--sds-clr-green-02);
+        color: var(--sds-clr-green-11);
+      }
+
+      &--failure {
+        background: var(--sds-clr-red-02);
+        color: var(--sds-clr-red-11);
+      }
+    }
+
+    &__details {
+      display: flex;
+      flex-direction: column;
+      gap: pxToRem(2px);
+    }
+
+    &__info {
+       font-size: pxToRem(12px);
+       color: var(--sds-clr-gray-11);
+    }
+
+    &__footer {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-top: pxToRem(4px);
+    }
+
+    &__date {
+      font-size: pxToRem(12px);
+      color: var(--sds-clr-gray-09);
+    }
+
+    &__link {
+      font-size: pxToRem(12px);
+      color: var(--sds-clr-blue-09);
+      text-decoration: none;
+      font-family: Menlo, Monaco, Consolas, "Courier New", monospace;
+
+      &:hover {
+        text-decoration: underline;
+      }
+    }
+  }
+
+  &__fetching-more {
+    display: flex;
+    justify-content: center;
+    padding: pxToRem(20px) 0;
+  }
+}

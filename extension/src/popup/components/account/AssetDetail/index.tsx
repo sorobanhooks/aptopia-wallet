@@ -3,6 +3,7 @@ import { useSelector } from "react-redux";
 import { BigNumber } from "bignumber.js";
 import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";
+import { useDispatch } from "react-redux";
 import { Button, CopyText, Icon, Link, Loader } from "@stellar/design-system";
 
 import { NetworkDetails } from "@shared/constants/stellar";
@@ -33,7 +34,6 @@ import {
 } from "popup/ducks/settings";
 import StellarLogo from "popup/assets/stellar-logo.png";
 import { formatAmount, roundUsdValue } from "popup/helpers/formatters";
-import { Loading } from "popup/components/Loading";
 import { AccountBalances } from "helpers/hooks/useGetBalances";
 import { title } from "helpers/transaction";
 import {
@@ -54,6 +54,12 @@ import { AccountHistoryData } from "popup/views/Account/hooks/useGetAccountHisto
 import { publicKeySelector } from "popup/ducks/accountServices";
 import { iconsSelector, tokenPricesSelector } from "popup/ducks/cache";
 import { AppDataType } from "helpers/hooks/useGetAppData";
+import { AppDispatch } from "popup/App";
+import {
+  handleRemoveTrustline,
+  removeTokenId,
+} from "popup/ducks/transactionSubmission";
+import { NETWORKS } from "@shared/constants/stellar";
 
 import "./styles.scss";
 
@@ -112,6 +118,7 @@ export const AssetDetail = ({
 }: AssetDetailProps) => {
   const { t } = useTranslation();
   const navigate = useNavigate();
+  const dispatch: AppDispatch = useDispatch();
   const networkDetails = useSelector(settingsNetworkDetailsSelector);
   const publicKey = useSelector(publicKeySelector);
   const cachedTokenPrices = useSelector(tokenPricesSelector);
@@ -138,8 +145,33 @@ export const AssetDetail = ({
     };
   }, [activeOptionsRef]);
 
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [activeAssetId, setActiveAssetId] = useState<string | null>(null);
+
   const canonical = getAssetFromCanonical(selectedAsset);
-  const isSorobanAsset = canonical.issuer && isSorobanIssuer(canonical.issuer);
+
+  const selectedBalanceForIssuer = canonical
+    ? (getBalanceByAsset(
+        canonical,
+        accountBalances.balances,
+      ) as Exclude<AssetType, LiquidityPoolShareAsset>)
+    : null;
+
+  const assetIssuer = selectedBalanceForIssuer
+    ? getIssuerFromBalance(selectedBalanceForIssuer)
+    : "";
+
+  const isSorobanAssetInitial =
+    canonical?.issuer && isSorobanIssuer(canonical.issuer);
+
+  const { assetDomain, error: assetError } = useAssetDomain({
+    assetIssuer,
+  });
+
+  if (!canonical) {
+    return null;
+  }
+  const isSorobanAsset = isSorobanAssetInitial;
 
   const selectedBalance = getBalanceByAsset(
     canonical,
@@ -154,9 +186,6 @@ export const AssetDetail = ({
       ? StellarLogo
       : icons[selectedAsset];
   const assetPrice = tokenPrices ? tokenPrices[selectedAsset] : null;
-  const assetIssuer = selectedBalance
-    ? getIssuerFromBalance(selectedBalance)
-    : "";
   const total =
     selectedBalance && "decimals" in selectedBalance
       ? formatTokenAmount(
@@ -173,13 +202,6 @@ export const AssetDetail = ({
 
   const availableTotal = `${formatAmount(balanceAvailable)} ${canonical.code}`;
   const displayTotal = `${formatAmount(total)} ${canonical.code}`;
-
-  const [isModalOpen, setIsModalOpen] = useState(false);
-  const [activeAssetId, setActiveAssetId] = useState<string | null>(null);
-
-  const { assetDomain, error: assetError } = useAssetDomain({
-    assetIssuer,
-  });
 
   if (historyData?.type === AppDataType.REROUTE) {
     return null;
@@ -203,10 +225,7 @@ export const AssetDetail = ({
       filteredAssetOperations.find((op) => op.id === activeAssetId) || null;
   }
 
-  if (assetIssuer && !assetDomain && !assetError && !isSorobanAsset) {
-    // if we have an asset issuer, wait until we have the asset domain before continuing
-    return <Loading />;
-  }
+  const isAssetDomainLoading = assetIssuer && !assetDomain && !assetError && !isSorobanAsset;
 
   const isStellarExpertSupported =
     isMainnet(networkDetails) || isTestnet(networkDetails);
@@ -289,6 +308,38 @@ export const AssetDetail = ({
                         </Link>
                       </div>
                     ) : null}
+                    {!isNativeBalance(selectedBalance) && (
+                      <div className="AssetDetail__options-actions__row">
+                        <div
+                          className="action"
+                          onClick={async () => {
+                            setOptionsOpen(false);
+                            if (isSorobanBalance(selectedBalance)) {
+                              await dispatch(
+                                removeTokenId({
+                                  contractId: selectedBalance.contractId,
+                                  network: networkDetails.network as NETWORKS,
+                                }),
+                              );
+                            } else {
+                              await dispatch(
+                                handleRemoveTrustline({
+                                  assetCode: canonical.code,
+                                  assetIssuer: canonical.issuer,
+                                  networkDetails,
+                                }),
+                              );
+                            }
+                            handleClose();
+                          }}
+                        >
+                          <div className="AssetDetail__options-actions__label">
+                            {t("Remove asset")}
+                          </div>
+                          <Icon.Trash01 />
+                        </div>
+                      </div>
+                    )}
                   </div>
                 ) : null}
               </>
@@ -314,7 +365,18 @@ export const AssetDetail = ({
                       AssetType,
                       LiquidityPoolShareAsset
                     >,
-                  ) || assetDomain}
+                  ) || (isAssetDomainLoading ? (
+                    <div
+                      style={{
+                        display: "flex",
+                        justifyContent: "center",
+                        alignItems: "center",
+                        padding: "1rem 0",
+                      }}
+                    >
+                      <Loader size="1.5rem" />
+                    </div>
+                  ) : assetDomain)}
             </div>
             {"contractId" in selectedBalance ? (
               <div className="AssetDetail__subtitle">

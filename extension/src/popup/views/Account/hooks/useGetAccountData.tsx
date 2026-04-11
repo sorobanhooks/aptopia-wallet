@@ -66,7 +66,9 @@ function useGetAccountData(options: {
     };
     shouldForceBalancesRefresh?: boolean;
   }) => {
-    dispatch({ type: "FETCH_DATA_START" });
+    if (state.state !== RequestState.SUCCESS) {
+      dispatch({ type: "FETCH_DATA_START" });
+    }
     try {
       if (updatedAppData && updatedAppData.publicKey) {
         await reduxDispatch(makeAccountActive(updatedAppData.publicKey));

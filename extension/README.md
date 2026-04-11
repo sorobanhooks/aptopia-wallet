@@ -1,21 +1,42 @@
 # Freighter Web Extension
 
+Freighter is a secure web extension for the Stellar network that enables users to manage their assets, interact with decentralized applications, and utilize automated trading agents.
+
+## Core Technology
+This extension leverages the **[stellar-wallet-sdk](https://www.npmjs.com/package/stellar-wallet-sdk)** for core wallet functionalities. While the SDK covers most wallet operations, this project extends it to support advanced features like the Agent Dashboard and custom automation.
+
+## Agent Dashboard
+The Agent Dashboard provides a comprehensive interface for managing automated trading agents:
+- **Activity Monitoring**: View real-time, paginated logs for agent trades and events.
+- **Rule Management**: Dynamically configure trading thresholds, including:
+    - `buyBelowUsd` / `sellAboveUsd` price targets.
+    - Tiered trade limits (`tier1Max`, `tier2Max`).
+    - `dailyBudget` caps.
+- **Live Metrics**: Monitor agent health, including XLM/USDC balances, daily spending, and lifetime trade success stats.
+- **One-Click Revocation**: Instantly disable agents and drain USDC back to the main wallet in case of emergencies.
+
+## Integration Details
+- **Backend Service**: Dedicated instance running at [http://4.240.103.107:4000](http://4.240.103.107:4000)
+- **Telegram Bot**: Interface with your wallet via the Xyra Bot: [https://t.me/xyra_wallet_test_bot](https://t.me/xyra_wallet_test_bot)
+
 ## Get Started
 
-This project builds a web extension
+### Configure the Environment
 
-### Configure the backend
+You will need to configure the backend and bot settings by creating an `.env` file at the path `extension/.env`. Use `.env.example` as a template.
 
-You will need to add a backend for Freighter to connect to. You can configure
-this by adding an `.env` file at the path `extension/.env`.
+Key configuration variables:
+- `INDEXER_URL`: Primary backend API (e.g., `https://freighter-backend-prd.stellar.org/api/v1`)
+- `BACKEND_URL`: Agent API host (`http://4.240.103.107:4000`)
+- `TELEGRAM_BOT`: Bot link (`https://t.me/xyra_wallet_test_bot`)
+- `STELLAR_NETWORK`: Target network (e.g., `testnet` or `public`)
+- `API_KEY`: Required for fetching token prices and Soroban RPC metadata.
 
-Inside this file, you can configure a backend by setting a value for the global
-variable `INDEXER_URL`. For example, to connect to the production backend, in
-your `.env` file, you can add the line
-`INDEXER_URL=https://freighter-backend-prd.stellar.org/api/v1`.
+#### How to get an API Key
+1. Sign up at **[sorobanhooks.xyz](https://www.sorobanhooks.xyz/)**.
+2. Navigate to **Account settings** in the sidebar (or go directly to [sorobanhooks.xyz/settings](https://www.sorobanhooks.xyz/settings)).
+3. In the **Account Details** section, copy your existing API key or generate a new one.
 
-To connect to a local instance of the backend, just swap out the value in
-`INDEXER_URL`.
 
 ### Build the extension and install it on your machine
 

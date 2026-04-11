@@ -1,5 +1,7 @@
 import { useReducer } from "react";
+import { useSelector } from "react-redux";
 
+import { RequestState } from "constants/request";
 import { initialState, isError, reducer } from "helpers/request";
 import { ApiTokenPrices, AssetIcons, Collectibles } from "@shared/api/types";
 import { ManageAssetCurrency } from "popup/components/manageAssets/ManageAssetRows";
@@ -17,6 +19,11 @@ import { NetworkDetails } from "@shared/constants/stellar";
 import { useGetTokenPrices } from "helpers/hooks/useGetTokenPrices";
 import { useGetCollectibles } from "helpers/hooks/useGetCollectibles";
 import { isCustomNetwork } from "@shared/helpers/stellar";
+import { 
+  formattedBalancesSelector, 
+  iconsSelector, 
+  tokenPricesSelector 
+} from "popup/ducks/cache";
 
 export interface ResolvedSendAmountData {
   type: AppDataType.RESOLVED;
@@ -28,6 +35,7 @@ export interface ResolvedSendAmountData {
   publicKey: string;
   networkDetails: NetworkDetails;
   tokenPrices: ApiTokenPrices;
+  collectibleData: Collectibles;
 }
 
 type SendAmountData = NeedsReRoute | ResolvedSendAmountData;
@@ -43,6 +51,11 @@ function useGetSendAmountData(
     reducer<SendAmountData, unknown>,
     initialState,
   );
+  
+  const cachedBalances = useSelector(formattedBalancesSelector);
+  const cachedIcons = useSelector(iconsSelector);
+  const cachedPrices = useSelector(tokenPricesSelector);
+
   const { fetchData: fetchBalances } = useGetBalances({
     showHidden: true,
     includeIcons: false,
@@ -55,11 +68,8 @@ function useGetSendAmountData(
   });
 
   const fetchData = async () => {
-    dispatch({ type: "FETCH_DATA_START" });
     try {
       const userDomains = await fetchAssetDomains(true);
-      let destinationAccount = await getBaseAccount(destinationAddress);
-
       if (isError<AssetDomains>(userDomains)) {
         throw new Error(userDomains.message);
       }
@@ -69,8 +79,34 @@ function useGetSendAmountData(
         return userDomains;
       }
 
+      const publicKey = userDomains.publicKey;
+      const networkDetails = userDomains.networkDetails;
+      const network = networkDetails.network;
+
+      // STALE-WHILE-REVALIDATE: Show cached data first
+      const userBalancesCache = cachedBalances[network]?.[publicKey];
+      if (userBalancesCache && state.state === RequestState.IDLE) {
+        const initialPayload = {
+          type: AppDataType.RESOLVED,
+          applicationState: userDomains.applicationState,
+          publicKey,
+          networkDetails,
+          userBalances: userBalancesCache,
+          destinationBalances: {} as AccountBalances,
+          icons: cachedIcons || {},
+          domains: userDomains.domains,
+          tokenPrices: cachedPrices[publicKey] || {},
+          collectibleData: {} as Collectibles,
+        } as ResolvedSendAmountData;
+        dispatch({ type: "FETCH_DATA_SUCCESS", payload: initialPayload });
+      } else if (!userBalancesCache && state.state !== RequestState.SUCCESS) {
+        dispatch({ type: "FETCH_DATA_START" });
+      }
+
+      let destinationAccount = await getBaseAccount(destinationAddress);
       const _isMainnet = isMainnet(userDomains.networkDetails);
       let destinationBalances = {} as AccountBalances;
+      
       if (destinationAccount && !isContractId(destinationAccount)) {
         const balances = await fetchBalances(
           destinationAccount,
@@ -119,7 +155,9 @@ function useGetSendAmountData(
       dispatch({ type: "FETCH_DATA_SUCCESS", payload });
       return payload;
     } catch (error) {
-      dispatch({ type: "FETCH_DATA_ERROR", payload: error });
+      if (state.state !== RequestState.SUCCESS) {
+        dispatch({ type: "FETCH_DATA_ERROR", payload: error });
+      }
       return error;
     }
   };

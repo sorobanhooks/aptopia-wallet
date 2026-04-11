@@ -86,10 +86,15 @@ export const useTokenLookup = ({
           setAssetRows([]);
         }
 
-        const isSacContract = await isSacContractExecutable(
-          contractId,
-          networkDetails,
-        );
+        let isSacContract = false;
+        try {
+          isSacContract = await isSacContractExecutable(
+            contractId,
+            networkDetails,
+          );
+        } catch (e) {
+          console.error("Error checking if contract is SAC executable:", e);
+        }
 
         if (!tokenDetailsResponse) {
           setAssetRows([]);

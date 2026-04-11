@@ -764,6 +764,9 @@ export const Operations = ({
         const hostfn = op.func;
 
         function renderDetails() {
+          if (typeof hostfn?.switch !== "function") {
+            return <></>;
+          }
           switch (hostfn.switch()) {
             case xdr.HostFunctionType.hostFunctionTypeCreateContractV2():
             case xdr.HostFunctionType.hostFunctionTypeCreateContract(): {
@@ -771,25 +774,31 @@ export const Operations = ({
               const preimage = createContractArgs.contractIdPreimage;
               const createV2Args = createContractArgs.constructorArgs;
 
-              if (preimage.switch().name === "contractIdPreimageFromAddress") {
+              if (
+                preimage &&
+                typeof preimage.switch === "function" &&
+                preimage.switch().name === "contractIdPreimageFromAddress"
+              ) {
                 const preimageFromAddress = preimage.fromAddress();
                 const address = preimageFromAddress.address();
 
-                const addressType = address.switch();
-                if (addressType.name === "scAddressTypeAccount") {
+                if (address && typeof address.switch === "function") {
+                  const addressType = address.switch();
+                  if (addressType.name === "scAddressTypeAccount") {
+                    return (
+                      createV2Args && (
+                        <KeyValueInvokeHostFnArgs args={createV2Args} />
+                      )
+                    );
+                  }
                   return (
-                    createV2Args && (
-                      <KeyValueInvokeHostFnArgs args={createV2Args} />
-                    )
+                    <>
+                      {createV2Args && (
+                        <KeyValueInvokeHostFnArgs args={createV2Args} />
+                      )}
+                    </>
                   );
                 }
-                return (
-                  <>
-                    {createV2Args && (
-                      <KeyValueInvokeHostFnArgs args={createV2Args} />
-                    )}
-                  </>
-                );
               }
 
               // contractIdPreimageFromAsset

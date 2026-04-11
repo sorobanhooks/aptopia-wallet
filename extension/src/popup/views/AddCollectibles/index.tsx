@@ -7,7 +7,6 @@ import { useNavigate } from "react-router-dom";
 import { useSelector } from "react-redux";
 import { captureException } from "@sentry/browser";
 
-import { fetchCollectibles } from "@shared/api/helpers/fetchCollectibles";
 import { publicKeySelector } from "popup/ducks/accountServices";
 import { navigateTo } from "popup/helpers/navigate";
 import { ROUTES } from "popup/constants/routes";
@@ -50,33 +49,6 @@ export const AddCollectibles = () => {
 
   const handleSubmit = async (values: FormValues) => {
     try {
-      const fetchedCollectible = await fetchCollectibles({
-        publicKey,
-        networkDetails,
-        contracts: [
-          {
-            id: values.collectibleContractAddress,
-            token_ids: [values.collectibleTokenId],
-          },
-        ],
-      });
-
-      // check to see if the collectible only returns an error from the API
-      // this would indicate it doesn't exist
-      if (
-        !fetchedCollectible.some(
-          (collection) =>
-            collection?.collection?.address ===
-              values.collectibleContractAddress &&
-            collection?.collection?.collectibles?.some(
-              (c) => c.tokenId === values.collectibleTokenId,
-            ),
-        )
-      ) {
-        setAddCollectibleError(t("Collectible not found"));
-        return;
-      }
-
       const response = await addCollectible({
         publicKey: publicKey,
         network: networkDetails.network,

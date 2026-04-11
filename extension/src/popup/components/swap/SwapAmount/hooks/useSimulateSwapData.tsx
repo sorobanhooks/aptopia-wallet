@@ -2,25 +2,16 @@ import { useReducer } from "react";
 import { useDispatch, useSelector } from "react-redux";
 import BigNumber from "bignumber.js";
 import {
-  Account,
-  Asset,
   BASE_FEE,
-  Memo,
-  Operation,
-  TransactionBuilder,
 } from "stellar-sdk";
 
 import { initialState, reducer } from "helpers/request";
 import { NetworkDetails } from "@shared/constants/stellar";
 import {
-  getAssetFromCanonical,
   getCanonicalFromAsset,
   stroopToXlm,
-  xlmToStroop,
 } from "helpers/stellar";
-import { computeDestMinWithSlippage } from "helpers/transaction";
 
-import { stellarSdkServer } from "@shared/api/helpers/stellarSdkServer";
 import {
   saveSimulation,
   saveSwapBestPath,
@@ -28,9 +19,9 @@ import {
 } from "popup/ducks/transactionSubmission";
 import { useScanTx } from "popup/helpers/blockaid";
 import { BlockAidScanTxResult } from "@shared/api/types";
-import { horizonGetBestPath } from "popup/helpers/horizonGetBestPath";
 import { formatAmount, roundUsdValue } from "popup/helpers/formatters";
 import { AppDispatch } from "popup/App";
+import { buildSwapTransaction as internalBuildSwapTransaction } from "@shared/api/internal";
 
 const scanUrlstub = "internal";
 
@@ -39,8 +30,8 @@ export const ERROR_TO_DISPLAY = {
 };
 
 interface SimulationParams {
-  sourceAsset: ReturnType<typeof getAssetFromCanonical>;
-  destAsset: ReturnType<typeof getAssetFromCanonical>;
+  sourceAsset: { code: string; issuer?: string };
+  destAsset: { code: string; issuer?: string };
   amount: string;
   allowedSlippage: string;
   path: string[];
@@ -54,82 +45,6 @@ export interface SimulateTxData {
   dstAmountPriceUsd: string;
   scanResult?: BlockAidScanTxResult | null;
 }
-
-const getOperation = (
-  sourceAsset: Asset | { code: string; issuer: string },
-  destAsset: Asset | { code: string; issuer: string },
-  amount: string,
-  destinationAmount: string,
-  allowedSlippage: string,
-  path: string[],
-  publicKey: string,
-) => {
-  const destMin = computeDestMinWithSlippage(
-    allowedSlippage,
-    destinationAmount,
-  );
-  return Operation.pathPaymentStrictSend({
-    sendAsset: sourceAsset as Asset,
-    sendAmount: amount,
-    destination: publicKey,
-    destAsset: destAsset as Asset,
-    destMin: destMin.toFixed(7),
-    path: path.map((p) => getAssetFromCanonical(p)) as Asset[],
-  });
-};
-
-const getBuiltTx = async (
-  publicKey: string,
-  opData: {
-    sourceAsset: Asset | { code: string; issuer: string };
-    destAsset: Asset | { code: string; issuer: string };
-    amount: string;
-    allowedSlippage: string;
-    destinationAmount: string;
-    path: string[];
-  },
-  fee: string,
-  transactionTimeout: number,
-  networkDetails: NetworkDetails,
-  memo?: string,
-) => {
-  const {
-    sourceAsset,
-    destAsset,
-    amount,
-    allowedSlippage,
-    destinationAmount,
-    path,
-  } = opData;
-  const server = stellarSdkServer(
-    networkDetails.networkUrl,
-    networkDetails.networkPassphrase,
-  );
-  const sourceAccount: Account = await server.loadAccount(publicKey);
-
-  const operation = getOperation(
-    sourceAsset,
-    destAsset,
-    amount,
-    destinationAmount,
-    allowedSlippage,
-    path,
-    publicKey,
-  );
-
-  const transaction = new TransactionBuilder(sourceAccount, {
-    fee: xlmToStroop(fee).toFixed(),
-    networkPassphrase: networkDetails.networkPassphrase,
-  })
-    .addOperation(operation)
-    .setTimeout(transactionTimeout);
-
-  if (memo) {
-    transaction.addMemo(Memo.text(memo));
-  }
-
-  return transaction;
-};
 
 function useSimulateTxData({
   publicKey,
@@ -166,30 +81,32 @@ function useSimulateTxData({
         simParams.transactionFee || stroopToXlm(BASE_FEE),
       );
 
-      const bestPath = await horizonGetBestPath({
-        amount,
-        sourceAsset: getCanonicalFromAsset(
-          sourceAsset.code,
-          sourceAsset.issuer,
-        ),
+      // Call the background service to build and get quote
+      const response = await internalBuildSwapTransaction({
+        activePublicKey: publicKey,
+        sourceAsset: getCanonicalFromAsset(sourceAsset.code, sourceAsset.issuer),
         destAsset: getCanonicalFromAsset(destAsset.code, destAsset.issuer),
+        amount,
         networkDetails,
+        slippagePercent: allowedSlippage,
+        memo,
+        fee: baseFee.toString(),
+        timeoutSeconds: transactionTimeout,
       });
 
-      if (!bestPath?.destination_amount) {
+      const { xdr, quote, error: backgroundError } = response as any;
+
+      if (backgroundError) {
+        throw new Error(backgroundError);
+      }
+
+      if (!quote?.destAmount) {
         throw new Error(ERROR_TO_DISPLAY.NO_PATH_FOUND);
       }
 
-      const destinationAmount = bestPath.destination_amount;
-      // store in canonical form for easier use
-      const path: string[] = [];
-      bestPath.path.forEach((p) => {
-        if (!p.asset_code && !p.asset_issuer) {
-          path.push(p.asset_type);
-        } else {
-          path.push(getCanonicalFromAsset(p.asset_code, p.asset_issuer));
-        }
-      });
+      const destinationAmount = quote.destAmount;
+      const path = quote.path;
+
       if (destinationRate) {
         payload.dstAmountPriceUsd = formatAmount(
           roundUsdValue(
@@ -199,24 +116,10 @@ function useSimulateTxData({
           ),
         );
       }
-      const transaction = await getBuiltTx(
-        publicKey,
-        {
-          sourceAsset,
-          destAsset,
-          amount,
-          destinationAmount,
-          allowedSlippage,
-          path,
-        },
-        baseFee.toString(),
-        transactionTimeout,
-        networkDetails,
-        memo,
-      );
-      const xdr = transaction.build().toXDR();
+
       payload.transactionXdr = xdr;
       payload.scanResult = await scanTx(xdr, scanUrlstub, networkDetails);
+      
       reduxDispatch(
         saveSimulation({
           preparedTransaction: xdr,
@@ -231,20 +134,21 @@ function useSimulateTxData({
 
       dispatch({ type: "FETCH_DATA_SUCCESS", payload });
       return payload;
-    } catch (error) {
+    } catch (error: any) {
+      console.error("Swap simulation failed:", error);
       const unknownErrorDisplay =
-        "We had an issue retrieving your transaction details. Please try again.";
+        "We had an issue retrieving your swap details. Please try again.";
       let payload: string;
 
       if (error instanceof Error) {
-        // If the error message matches one of our known display errors, use it
-        payload = Object.values(ERROR_TO_DISPLAY).includes(error.message)
-          ? error.message
-          : unknownErrorDisplay;
+        const isKnownError = Object.values(ERROR_TO_DISPLAY).includes(
+          error.message,
+        );
+        payload = isKnownError ? error.message : error.message || unknownErrorDisplay;
       } else if (typeof error === "string") {
         payload = Object.values(ERROR_TO_DISPLAY).includes(error)
           ? error
-          : unknownErrorDisplay;
+          : error || unknownErrorDisplay;
       } else {
         payload = unknownErrorDisplay;
       }

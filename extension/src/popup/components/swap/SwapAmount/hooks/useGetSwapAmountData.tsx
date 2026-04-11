@@ -1,5 +1,6 @@
 import { useReducer } from "react";
 
+import { RequestState } from "constants/request";
 import { initialState, isError, reducer } from "helpers/request";
 import { ApiTokenPrices, AssetIcons } from "@shared/api/types";
 import { ManageAssetCurrency } from "popup/components/manageAssets/ManageAssetRows";
@@ -30,6 +31,13 @@ export interface ResolvedSwapAmountData {
 
 type SwapAmountData = NeedsReRoute | ResolvedSwapAmountData;
 
+import { useSelector } from "react-redux";
+import { 
+  formattedBalancesSelector, 
+  iconsSelector, 
+  tokenPricesSelector 
+} from "popup/ducks/cache";
+
 function useGetSwapAmountData(
   options: {
     showHidden: boolean;
@@ -41,6 +49,11 @@ function useGetSwapAmountData(
     reducer<SwapAmountData, unknown>,
     initialState,
   );
+  
+  const cachedBalances = useSelector(formattedBalancesSelector);
+  const cachedIcons = useSelector(iconsSelector);
+  const cachedPrices = useSelector(tokenPricesSelector);
+
   const { fetchData: fetchBalances } = useGetBalances({
     showHidden: true,
     includeIcons: false,
@@ -51,11 +64,8 @@ function useGetSwapAmountData(
     useGetAssetDomainsWithBalances(options);
 
   const fetchData = async () => {
-    dispatch({ type: "FETCH_DATA_START" });
     try {
       const userDomains = await fetchAssetDomains(true);
-      let destinationAccount = await getBaseAccount(destinationAddress);
-
       if (isError<AssetDomains>(userDomains)) {
         throw new Error(userDomains.message);
       }
@@ -65,8 +75,33 @@ function useGetSwapAmountData(
         return userDomains;
       }
 
+      const publicKey = userDomains.publicKey;
+      const networkDetails = userDomains.networkDetails;
+      const network = networkDetails.network;
+
+      // STALE-WHILE-REVALIDATE: Show cached data first
+      const userBalancesCache = cachedBalances[network]?.[publicKey];
+      if (userBalancesCache && state.state === RequestState.IDLE) {
+        const initialPayload = {
+          type: AppDataType.RESOLVED,
+          applicationState: userDomains.applicationState,
+          publicKey,
+          networkDetails,
+          userBalances: userBalancesCache,
+          destinationBalances: {} as AccountBalances,
+          icons: cachedIcons || {},
+          domains: userDomains.domains,
+          tokenPrices: cachedPrices[publicKey] || {},
+        } as ResolvedSwapAmountData;
+        dispatch({ type: "FETCH_DATA_SUCCESS", payload: initialPayload });
+      } else if (!userBalancesCache && state.state !== RequestState.SUCCESS) {
+        dispatch({ type: "FETCH_DATA_START" });
+      }
+
+      let destinationAccount = await getBaseAccount(destinationAddress);
       const _isMainnet = isMainnet(userDomains.networkDetails);
       let destinationBalances = {} as AccountBalances;
+      
       if (destinationAccount && !isContractId(destinationAccount)) {
         const balances = await fetchBalances(
           destinationAccount,
@@ -104,7 +139,9 @@ function useGetSwapAmountData(
       dispatch({ type: "FETCH_DATA_SUCCESS", payload });
       return payload;
     } catch (error) {
-      dispatch({ type: "FETCH_DATA_ERROR", payload: error });
+      if (state.state !== RequestState.SUCCESS) {
+        dispatch({ type: "FETCH_DATA_ERROR", payload: error });
+      }
       return error;
     }
   };

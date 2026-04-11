@@ -24,6 +24,11 @@ const _AMPLITUDE_EXPERIMENT_DEPLOYMENT_KEY =
 
 export const METRICS_PLATFORM = "WEB";
 
+export const BACKEND_URL = process.env.BACKEND_URL || "";
+export const TELEGRAM_BOT = process.env.TELEGRAM_BOT || "";
+export const STELLAR_NETWORK = process.env.STELLAR_NETWORK || "testnet";
+export const API_KEY = process.env.API_KEY || "";
+
 export {
   _AMPLITUDE_KEY as AMPLITUDE_KEY,
   _AMPLITUDE_EXPERIMENT_DEPLOYMENT_KEY as AMPLITUDE_EXPERIMENT_DEPLOYMENT_KEY,

@@ -84,7 +84,9 @@ function useGetIcons() {
   */
 
   const fetchData = async () => {
-    dispatch({ type: "FETCH_DATA_START" });
+    if (state.state !== RequestState.SUCCESS) {
+      dispatch({ type: "FETCH_DATA_START" });
+    }
     try {
       const payload = {
         type: AppDataType.RESOLVED,

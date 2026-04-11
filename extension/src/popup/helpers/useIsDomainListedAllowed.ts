@@ -11,8 +11,9 @@ export const useIsDomainListedAllowed = ({ domain }: { domain: string }) => {
     allowList?.[networkDetails.networkName]?.[publicKey] || [];
 
   // Convert domain to punycode before checking, since domains are stored as punycode
-  const punycodedDomain = getPunycodedDomain(domain);
-  const isDomainListedAllowed = allowlistByKey.includes(punycodedDomain);
+  const isDomainListedAllowed = domain
+    ? allowlistByKey.includes(getPunycodedDomain(domain))
+    : false;
 
   return { isDomainListedAllowed };
 };

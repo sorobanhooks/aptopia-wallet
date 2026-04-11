@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useDispatch, useSelector } from "react-redux";
 import { Form, Field, FieldProps, Formik } from "formik";
@@ -25,21 +25,33 @@ import { View } from "popup/basics/layout/View";
 
 import "./styles.scss";
 
+type ImportMode = "secretKey" | "mnemonic";
+
 export const ImportAccount = () => {
+  const [importMode, setImportMode] = useState<ImportMode>("secretKey");
+
   interface FormValues {
     password: string;
     privateKey: string;
+    mnemonicPhrase: string;
     authorization: boolean;
   }
 
   const initialValues: FormValues = {
     password: "",
     privateKey: "",
+    mnemonicPhrase: "",
     authorization: false,
   };
 
-  const ImportAccountSchema = YupObject().shape({
+  const secretKeySchema = YupObject().shape({
     privateKey: YupString().required(),
+    password: YupString().required(),
+    authorization: YupBool().oneOf([true], "required"),
+  });
+
+  const mnemonicSchema = YupObject().shape({
+    mnemonicPhrase: YupString().required(),
     password: YupString().required(),
     authorization: YupBool().oneOf([true], "required"),
   });
@@ -50,9 +62,15 @@ export const ImportAccount = () => {
   const navigate = useNavigate();
 
   const handleSubmit = async (values: FormValues) => {
-    const { password, privateKey } = values;
+    const { password, privateKey, mnemonicPhrase } = values;
 
-    const res = await dispatch(importAccount({ password, privateKey }));
+    const res = await dispatch(
+      importAccount({
+        password,
+        privateKey: importMode === "secretKey" ? privateKey : "",
+        mnemonicPhrase: importMode === "mnemonic" ? mnemonicPhrase : undefined,
+      }),
+    );
 
     if (importAccount.fulfilled.match(res)) {
       emitMetric(METRIC_NAMES.accountScreenImportAccount, {
@@ -66,14 +84,41 @@ export const ImportAccount = () => {
     }
   };
 
+  const isSecretKey = importMode === "secretKey";
+
   return (
     <React.Fragment>
-      <SubviewHeader title={t("Import Stellar Secret Key")} />
+      <SubviewHeader
+        title={
+          isSecretKey
+            ? t("Import Stellar Secret Key")
+            : t("Import from Recovery Phrase")
+        }
+      />
+
+      {/* ── Mode Toggle ─────────────────────────────────────────── */}
+      <div className="ImportAccount__tabs">
+        <button
+          type="button"
+          className={`ImportAccount__tab${isSecretKey ? " ImportAccount__tab--active" : ""}`}
+          onClick={() => setImportMode("secretKey")}
+        >
+          {t("Secret Key")}
+        </button>
+        <button
+          type="button"
+          className={`ImportAccount__tab${!isSecretKey ? " ImportAccount__tab--active" : ""}`}
+          onClick={() => setImportMode("mnemonic")}
+        >
+          {t("Recovery Phrase")}
+        </button>
+      </div>
 
       <Formik
         initialValues={initialValues}
         onSubmit={handleSubmit}
-        validationSchema={ImportAccountSchema}
+        validationSchema={isSecretKey ? secretKeySchema : mnemonicSchema}
+        enableReinitialize
       >
         {({ dirty, isSubmitting, isValid }) => (
           <Form className="View__contentAndFooterWrapper">
@@ -84,26 +129,49 @@ export const ImportAccount = () => {
                   icon={<Icon.InfoOctagon />}
                   title={t("Read before importing your key")}
                 >
-                  {t(
-                    `${t("Freighter can’t recover your imported secret key using your recovery phrase.")} ${t("Storing your secret key is your responsibility.")} ${t("Freighter will never ask for your secret key outside of the extension.")}`,
-                  )}
+                  {isSecretKey
+                    ? t(
+                        `${t("Freighter can't recover your imported secret key using your recovery phrase.")} ${t("Storing your secret key is your responsibility.")} ${t("Freighter will never ask for your secret key outside of the extension.")}`,
+                      )
+                    : t(
+                        `${t("Importing via recovery phrase will derive the first account (index 0).")} ${t("Freighter will never ask for your recovery phrase outside of the extension.")}`,
+                      )}
                 </Notification>
               </div>
 
               <FormRows>
-                <Field name="privateKey">
-                  {({ field }: FieldProps) => (
-                    <Input
-                      fieldSize="md"
-                      autoComplete="off"
-                      id="privateKey-input"
-                      type="password"
-                      placeholder={t("Your Stellar secret key")}
-                      error={authError}
-                      {...field}
-                    />
-                  )}
-                </Field>
+                {isSecretKey ? (
+                  <Field name="privateKey">
+                    {({ field }: FieldProps) => (
+                      <Input
+                        fieldSize="md"
+                        autoComplete="off"
+                        id="privateKey-input"
+                        type="password"
+                        placeholder={t("Your Stellar secret key")}
+                        error={authError}
+                        {...field}
+                      />
+                    )}
+                  </Field>
+                ) : (
+                  <Field name="mnemonicPhrase">
+                    {({ field }: FieldProps) => (
+                      <Input
+                        fieldSize="md"
+                        autoComplete="off"
+                        id="mnemonicPhrase-input"
+                        type="password"
+                        placeholder={t(
+                          "Your 12 or 24-word recovery phrase",
+                        )}
+                        error={authError}
+                        {...field}
+                      />
+                    )}
+                  </Field>
+                )}
+
                 <Field name="password">
                   {({ field }: FieldProps) => (
                     <Input
@@ -117,15 +185,22 @@ export const ImportAccount = () => {
                     />
                   )}
                 </Field>
+
                 <Field name="authorization">
                   {({ field }: FieldProps) => (
                     <Checkbox
                       fieldSize="md"
                       autoComplete="off"
                       id="authorization-input"
-                      label={t(
-                        "I’m aware Freighter can’t recover the imported  secret key",
-                      )}
+                      label={
+                        isSecretKey
+                          ? t(
+                              "I'm aware Freighter can't recover the imported  secret key",
+                            )
+                          : t(
+                              "I understand this imports the first account derived from my recovery phrase",
+                            )
+                      }
                       {...field}
                     />
                   )}

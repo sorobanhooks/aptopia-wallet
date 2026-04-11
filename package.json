@@ -11,7 +11,8 @@
     "@shared/helpers",
     "docs",
     "extension",
-    "@stellar/freighter-api"
+    "@stellar/freighter-api",
+    "services/agent"
   ],
   "scripts": {
     "setup": "yarn install && yarn allow-scripts",
@@ -106,6 +107,7 @@
     "prettier": "3.5.1",
     "pretty-quick": "4.0.0",
     "react-i18next": "15.4.1",
+    "stellar-wallet-sdk": "^0.0.8",
     "ts-loader": "9.5.1",
     "typescript": "5.7.3",
     "webpack": "5.97.1",

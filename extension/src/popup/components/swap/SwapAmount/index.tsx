@@ -1,24 +1,23 @@
 import React, { useEffect, useRef, useState } from "react";
 import { useDispatch, useSelector } from "react-redux";
-import { Navigate } from "react-router-dom";
+import { Navigate, useLocation } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { Form, Field, FieldProps, Formik, useFormik } from "formik";
+import { useFormik } from "formik";
 import BigNumber from "bignumber.js";
-import { object as YupObject, number as YupNumber } from "yup";
-import { Button, Card, Icon, Input } from "@stellar/design-system";
+import { Button, Icon, Loader } from "@stellar/design-system";
 
 import { View } from "popup/basics/layout/View";
 import { SubviewHeader } from "popup/components/SubviewHeader";
 import { useNetworkFees } from "popup/helpers/useNetworkFees";
 import { useRunAfterUpdate } from "popup/helpers/useRunAfterUpdate";
 import {
-  saveAllowedSlippage,
   saveAmount,
   saveAmountUsd,
   saveTransactionFee,
   saveTransactionTimeout,
   transactionDataSelector,
   transactionSubmissionSelector,
+  saveAllowedSlippage,
 } from "popup/ducks/transactionSubmission";
 import {
   cleanAmount,
@@ -27,10 +26,9 @@ import {
   roundUsdValue,
 } from "popup/helpers/formatters";
 import { TX_SEND_MAX } from "popup/constants/transaction";
-import { useGetSwapAmountData } from "./hooks/useGetSwapAmountData";
+import { useGetSwapAmountData, ResolvedSwapAmountData } from "./hooks/useGetSwapAmountData";
 import { getAssetFromCanonical, isMainnet } from "helpers/stellar";
 import { RequestState } from "constants/request";
-import { Loading } from "popup/components/Loading";
 import { AppDataType } from "helpers/hooks/useGetAppData";
 import { openTab } from "popup/helpers/navigate";
 import { newTabHref } from "helpers/urls";
@@ -49,6 +47,9 @@ import { publicKeySelector } from "popup/ducks/accountServices";
 import { settingsNetworkDetailsSelector } from "popup/ducks/settings";
 import { SlideupModal } from "popup/components/SlideupModal";
 import { AssetTile } from "popup/components/AssetTile";
+import { Formik, Field, FieldProps, Form } from "formik";
+import { Card, Input } from "@stellar/design-system";
+import { object as YupObject, number as YupNumber } from "yup";
 
 import "./styles.scss";
 
@@ -73,6 +74,7 @@ export const SwapAmount = ({
   goToEditDst,
 }: SwapAmountProps) => {
   const { t } = useTranslation();
+  const location = useLocation();
   const dispatch = useDispatch<AppDispatch>();
   const { networkCongestion, recommendedFee } = useNetworkFees();
   const runAfterUpdate = useRunAfterUpdate();
@@ -111,7 +113,7 @@ export const SwapAmount = ({
       publicKey,
       networkDetails,
       simParams: {
-        sourceAsset: srcAsset,
+        sourceAsset: srcAsset!,
         destAsset: dstAsset!,
         amount,
         allowedSlippage,
@@ -145,8 +147,8 @@ export const SwapAmount = ({
   const [isReviewingTx, setIsReviewingTx] = React.useState(false);
 
   const handleContinue = async (values: { amount: string }) => {
-    const amount = inputType === "crypto" ? values.amount : priceValue!;
-    const cleanedAmount = cleanAmount(amount);
+    const amountVal = inputType === "crypto" ? values.amount : priceValue!;
+    const cleanedAmount = cleanAmount(amountVal);
     dispatch(saveAmount(cleanedAmount));
     await fetchSimulationData({
       amount: cleanedAmount,
@@ -156,8 +158,8 @@ export const SwapAmount = ({
   };
 
   const validate = (values: { amount: string }) => {
-    const amount = inputType === "crypto" ? values.amount : priceValue!;
-    const val = cleanAmount(amount);
+    const amountVal = inputType === "crypto" ? values.amount : priceValue!;
+    const val = cleanAmount(amountVal);
     if (val.indexOf(".") !== -1 && val.split(".")[1].length > 7) {
       return { amount: AMOUNT_ERROR.DEC_MAX };
     }
@@ -187,9 +189,6 @@ export const SwapAmount = ({
   };
 
   const parsedSourceAsset = getAssetFromCanonical(formik.values.asset);
-  const isLoading =
-    swapAmountData.state === RequestState.IDLE ||
-    swapAmountData.state === RequestState.LOADING;
 
   useEffect(() => {
     if (cryptoInputRef.current) {
@@ -211,11 +210,9 @@ export const SwapAmount = ({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  if (isLoading) {
-    return <Loading />;
-  }
-
   const hasError = swapAmountData.state === RequestState.ERROR;
+  const isResolved = swapAmountData.data?.type === AppDataType.RESOLVED;
+
   if (swapAmountData.data?.type === AppDataType.REROUTE) {
     if (swapAmountData.data.shouldOpenTab) {
       openTab(newTabHref(swapAmountData.data.routeTarget));
@@ -230,25 +227,25 @@ export const SwapAmount = ({
     );
   }
 
-  if (!hasError) {
+  if (!hasError && isResolved) {
     reRouteOnboarding({
-      type: swapAmountData.data.type,
-      applicationState: swapAmountData.data.applicationState,
+      type: swapAmountData.data!.type,
+      applicationState: swapAmountData.data!.applicationState,
       state: swapAmountData.state,
     });
   }
 
-  const sendData = swapAmountData.data!;
-  const assetIcon = sendData.icons[asset];
-  const dstAssetIcon = sendData.icons[destinationAsset];
-  const dstAssetBalance = dstAsset
+  const sendData = isResolved ? (swapAmountData.data as ResolvedSwapAmountData) : null;
+  const assetIcon = sendData?.icons[asset];
+  const dstAssetIcon = sendData?.icons[destinationAsset];
+  const dstAssetBalance = dstAsset && sendData
     ? findAssetBalance(sendData.userBalances.balances, dstAsset)
     : null;
-  const prices = sendData.tokenPrices;
+  const prices = sendData?.tokenPrices || {};
   const assetPrice = prices[asset] && prices[asset].currentPrice;
   const xlmPrice = prices["native"]?.currentPrice;
   const dstAssetPrice = prices[destinationAsset]?.currentPrice;
-  const assetDecimals = getAssetDecimals(asset, sendData.userBalances, isToken);
+  const assetDecimals = sendData ? getAssetDecimals(asset, sendData.userBalances, isToken) : 7;
   const priceValue = assetPrice
     ? new BigNumber(cleanAmount(formik.values.amountUsd))
         .dividedBy(new BigNumber(assetPrice))
@@ -272,12 +269,12 @@ export const SwapAmount = ({
       )}`
     : null;
   const supportsUsd =
-    isMainnet(swapAmountData.data?.networkDetails!) && assetPrice;
-  const availableBalance = getAvailableBalance({
+    sendData && isMainnet(sendData.networkDetails) && assetPrice;
+  const availableBalance = sendData ? getAvailableBalance({
     assetCanonical: asset,
     balances: sendData.userBalances.balances,
     recommendedFee: fee,
-  });
+  }) : "0";
   const displayTotal = `${formatAmount(availableBalance)}`;
   const dstDisplayTotal =
     dstAssetBalance && dstAsset
@@ -351,14 +348,14 @@ export const SwapAmount = ({
                   new BigNumber(formik.values.amount).isZero()) ||
                 (inputType === "fiat" &&
                   new BigNumber(formik.values.amountUsd).isZero()) ||
-                isAmountTooHigh
+                isAmountTooHigh || !sendData
               }
               onClick={(e) => {
                 e.preventDefault();
                 formik.submitForm();
               }}
             >
-              {destinationAsset ? t("Review swap") : t("Select an asset")}
+              {!sendData ? <Loader size="1.5rem" /> : (destinationAsset ? t("Review swap") : t("Select an asset"))}
             </Button>
           </div>
         }
@@ -399,11 +396,11 @@ export const SwapAmount = ({
                               formatAmountPreserveCursor(
                                 e.target.value,
                                 formik.values.amount,
-                                getAssetDecimals(
+                                sendData ? getAssetDecimals(
                                   asset,
                                   sendData.userBalances,
                                   isToken,
-                                ),
+                                ) : 7,
                                 e.target.selectionStart || 1,
                               );
                             formik.setFieldValue("amount", newAmount);
@@ -419,7 +416,7 @@ export const SwapAmount = ({
                         <div
                           className={`SwapAsset__amount-label SwapAsset__${getAmountFontSize()}`}
                         >
-                          {parsedSourceAsset.code}
+                          {parsedSourceAsset?.code}
                         </div>
                       </>
                     )}
@@ -478,7 +475,7 @@ export const SwapAmount = ({
                   <div className="SwapAsset__amount-price">
                     {inputType === "crypto"
                       ? `$${priceValueUsd}`
-                      : `${priceValue} ${parsedSourceAsset.code}`}
+                      : `${priceValue} ${parsedSourceAsset?.code}`}
                     <Button
                       size="md"
                       type="button"
@@ -509,7 +506,7 @@ export const SwapAmount = ({
                       <Icon.AlertCircle />
                       <span>
                         {t("You don’t have enough {{asset}} in your account", {
-                          asset: parsedSourceAsset.code,
+                          asset: parsedSourceAsset?.code,
                         })}
                       </span>
                     </>
@@ -521,6 +518,7 @@ export const SwapAmount = ({
                     type="button"
                     variant="tertiary"
                     isRounded
+                    disabled={!sendData}
                     onClick={(e) => {
                       e.preventDefault();
                       emitMetric(METRIC_NAMES.swapAmount);
@@ -549,11 +547,11 @@ export const SwapAmount = ({
                 <AssetTile
                   isSuspicious={false}
                   asset={{
-                    code: srcAsset.code,
+                    code: srcAsset?.code || "",
                     canonical: asset,
-                    issuer: srcAsset.issuer,
+                    issuer: srcAsset?.issuer || "",
                   }}
-                  assetIcon={assetIcon}
+                  assetIcon={assetIcon || null}
                   balance={displayTotal}
                   onClick={goToEditSrcAction}
                   emptyLabel={t("Send")}
@@ -570,7 +568,7 @@ export const SwapAmount = ({
                         }
                       : null
                   }
-                  assetIcon={dstAssetIcon}
+                  assetIcon={dstAssetIcon || null}
                   balance={dstDisplayTotal}
                   onClick={goToEditDst}
                   emptyLabel={t("Receive")}
@@ -602,14 +600,14 @@ export const SwapAmount = ({
               congestion={networkCongestion}
               onClose={() => setIsEditingSettings(false)}
               onSubmit={({
-                fee,
-                timeout,
+                fee: newFee,
+                timeout: newTimeout,
               }: {
                 fee: string;
                 timeout: number;
               }) => {
-                dispatch(saveTransactionFee(fee));
-                dispatch(saveTransactionTimeout(timeout));
+                dispatch(saveTransactionFee(newFee));
+                dispatch(saveTransactionTimeout(newTimeout));
                 setIsEditingSettings(false);
               }}
             />
@@ -626,7 +624,7 @@ export const SwapAmount = ({
       >
         {isReviewingTx ? (
           <ReviewTx
-            assetIcon={assetIcon}
+            assetIcon={assetIcon || null}
             fee={fee}
             networkDetails={networkDetails}
             onCancel={() => setIsReviewingTx(false)}
@@ -636,9 +634,9 @@ export const SwapAmount = ({
             simulationState={simulationState}
             srcAsset={asset}
             dstAsset={{
-              icon: dstAssetIcon,
+              icon: dstAssetIcon || null,
               canonical: destinationAsset,
-              priceUsd: simulationState.data?.dstAmountPriceUsd!,
+              priceUsd: simulationState.data?.dstAmountPriceUsd || null,
               amount: destinationAmount,
             }}
             title={t("You are swapping")}

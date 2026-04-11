@@ -284,7 +284,7 @@ export const ReviewTx = ({
     if (isHardwareWallet) {
       dispatch(
         startHwSign({
-          transactionXDR: simulationState.data!.transactionXdr,
+          transactionXDR: simulationState.data?.transactionXdr || "",
           shouldSubmit: true,
         }),
       );
@@ -303,7 +303,7 @@ export const ReviewTx = ({
               isCollectible={isCollectible}
               collectibleData={collectibleData}
               assetIcons={assetIcons}
-              asset={asset}
+              asset={asset!}
               assetIcon={assetIcon}
               sendAmount={sendAmount}
               networkDetails={networkDetails}
@@ -379,8 +379,8 @@ export const ReviewTx = ({
           </div>
           <div className="ReviewTx__Details__Row__Value">
             <CopyValue
-              value={simulationState.data!.transactionXdr}
-              displayValue={simulationState.data!.transactionXdr}
+              value={simulationState.data?.transactionXdr || ""}
+              displayValue={simulationState.data?.transactionXdr || ""}
             />
           </div>
         </div>
@@ -461,7 +461,7 @@ export const ReviewTx = ({
               isSubmitDisabled={isSubmitDisabled}
               dstAsset={dstAsset}
               dest={dest}
-              asset={asset}
+              asset={asset!}
               truncatedDest={truncatedDest}
               setActivePaneIndex={setActivePaneIndex}
             />

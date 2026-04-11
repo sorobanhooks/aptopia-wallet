@@ -1,4 +1,42 @@
 import browser from "webextension-polyfill";
+
+// ── Polyfills for Stellar Wallet SDK ──────────────────────────────────────────
+// Service workers (background scripts) lack window and localStorage.
+// We polyfill them as a persistent store that syncs with browser.storage.local.
+const LOCAL_STORAGE_POLYFILL_KEY = "localStoragePolyfill";
+const _memStorage: Record<string, string | null> = {};
+
+(globalThis as any).window = globalThis;
+(globalThis as any).localStorage = {
+  getItem: (key: string) => _memStorage[key] || null,
+  setItem: (key: string, value: string) => {
+    _memStorage[key] = value;
+    // We don't await this because the SDK doesn't expect localStorage to be async.
+    // However, the write is sent to persistent storage immediately.
+    browser.storage.local.set({ [LOCAL_STORAGE_POLYFILL_KEY]: _memStorage });
+  },
+  removeItem: (key: string) => {
+    delete _memStorage[key];
+    browser.storage.local.set({ [LOCAL_STORAGE_POLYFILL_KEY]: _memStorage });
+  },
+  clear: () => {
+    Object.keys(_memStorage).forEach((k) => delete _memStorage[k]);
+    browser.storage.local.set({ [LOCAL_STORAGE_POLYFILL_KEY]: _memStorage });
+  },
+  get length() {
+    return Object.keys(_memStorage).length;
+  },
+  key: (index: number) => Object.keys(_memStorage)[index] || null,
+};
+
+export const initSDKStorage = async () => {
+  const result = await browser.storage.local.get(LOCAL_STORAGE_POLYFILL_KEY);
+  if (result[LOCAL_STORAGE_POLYFILL_KEY]) {
+    Object.assign(_memStorage, result[LOCAL_STORAGE_POLYFILL_KEY]);
+  }
+};
+// ──────────────────────────────────────────────────────────────────────────────
+
 import { ROUTES } from "popup/constants/routes";
 import {
   EXTERNAL_SERVICE_TYPES,
