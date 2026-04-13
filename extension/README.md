@@ -2,6 +2,10 @@
 
 Freighter is a secure web extension for the Stellar network that enables users to manage their assets, interact with decentralized applications, and utilize automated trading agents.
 
+# Sorobanhooks Smart Wallet
+
+A secure Stellar wallet extension for managing assets, interacting with decentralized applications, and utilizing automated trading agents.
+
 ## Core Technology
 This extension leverages the **[stellar-wallet-sdk](https://www.npmjs.com/package/stellar-wallet-sdk)** for core wallet functionalities. While the SDK covers most wallet operations, this project extends it to support advanced features like the Agent Dashboard and custom automation.
 
@@ -16,8 +20,12 @@ The Agent Dashboard provides a comprehensive interface for managing automated tr
 - **One-Click Revocation**: Instantly disable agents and drain USDC back to the main wallet in case of emergencies.
 
 ## Integration Details
-- **Backend Service**: Dedicated instance running at [http://4.240.103.107:4000](http://4.240.103.107:4000)
-- **Telegram Bot**: Interface with your wallet via the Xyra Bot: [https://t.me/xyra_wallet_test_bot](https://t.me/xyra_wallet_test_bot)
+- **Backend Service**: Dedicated instance running at [https://agent.sorobanhooks.xyz](https://agent.sorobanhooks.xyz)
+- **Telegram Bot**: Interface with your wallet via the Xyra Bot: [https://t.me/Sorobanhooks_wallet_agent_bot](https://t.me/Sorobanhooks_wallet_agent_bot)
+
+## Demo
+
+[![Sorobanhooks Smart Wallet Demo](https://img.youtube.com/vi/_CUyHERtdqw/0.jpg)](https://www.youtube.com/watch?v=_CUyHERtdqw)
 
 ## Get Started
 
@@ -27,8 +35,8 @@ You will need to configure the backend and bot settings by creating an `.env` fi
 
 Key configuration variables:
 - `INDEXER_URL`: Primary backend API (e.g., `https://freighter-backend-prd.stellar.org/api/v1`)
-- `BACKEND_URL`: Agent API host (`http://4.240.103.107:4000`)
-- `TELEGRAM_BOT`: Bot link (`https://t.me/xyra_wallet_test_bot`)
+- `BACKEND_URL`: Agent API host (`https://agent.sorobanhooks.xyz`)
+- `TELEGRAM_BOT`: Bot link (`https://t.me/Sorobanhooks_wallet_agent_bot`)
 - `STELLAR_NETWORK`: Target network (e.g., `testnet` or `public`)
 - `API_KEY`: Required for fetching token prices and Soroban RPC metadata.
 
@@ -67,7 +75,7 @@ To install on Chrome:
 4. Click `Load Unpacked` and it will open your file system.
 
 5. Navigate to this folder (`/extension`) and click the `build` folder. Hit
-   `Select`. You should now see an icon for Freighter in Chrome.
+   `Select`. You should now see an icon for the extension in Chrome.
 
 To install on Firefox:
 
@@ -76,7 +84,7 @@ To install on Firefox:
 2. Click `Load Temporary Add-On`
 
 3. Navigate to this folder (`/extension`) and open the `build` folder and find
-   `manifest.json`. Hit `Select`. You should now see an icon for Freighter in
+   `manifest.json`. Hit `Select`. You should now see an icon for the extension in
    Firefox
 
 ### Build the extension using production settings
