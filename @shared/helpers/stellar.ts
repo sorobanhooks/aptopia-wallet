@@ -186,19 +186,23 @@ export const getAssetFromCanonical = (canonical: string) => {
   if (!canonical) {
     return null;
   }
-  if (canonical === "native") {
+
+  const normalized = canonical.trim().toLowerCase();
+
+  if (normalized === "native" || normalized === "xlm") {
     return StellarSdk.Asset.native();
   }
-  if (canonical?.includes(":")) {
-    const [code, issuer] = canonical.split(":");
+
+  if (normalized.includes(":")) {
+    const [code, issuer] = normalized.split(":");
 
     if (isSorobanIssuer(issuer)) {
       return {
-        code,
+        code: code.toUpperCase(),
         issuer,
       };
     }
-    return new StellarSdk.Asset(code, issuer);
+    return new StellarSdk.Asset(code.toUpperCase(), issuer);
   }
 
   throw new Error(`invalid asset canonical id: ${canonical}`);

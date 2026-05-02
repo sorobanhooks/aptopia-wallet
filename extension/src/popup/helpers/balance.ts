@@ -197,7 +197,17 @@ export const getPriceDeltaColor = (delta: BigNumber) => {
 
 export const getTotalUsd = (prices: ApiTokenPrices, balances: AssetType[]) => {
   return Object.keys(prices).reduce((prev, curr) => {
-    const asset = getAssetFromCanonical(curr);
+    let asset;
+    try {
+      asset = getAssetFromCanonical(curr);
+    } catch (e) {
+      return prev;
+    }
+
+    if (!asset) {
+      return prev;
+    }
+
     const priceBalance = getBalanceByAsset(asset, balances);
     if (!priceBalance) {
       return prev;

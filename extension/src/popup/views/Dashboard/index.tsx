@@ -173,7 +173,12 @@ export const Dashboard = () => {
               <div className="Dashboard__card__balance-item">
                 <span className="Dashboard__card__balance-label">{t("USDC Balance")}</span>
                 <span className="Dashboard__card__balance">
-                  {metrics?.balances.usdc || "0.00"} USDC
+                  {metrics?.balances.assets
+                    ? Object.entries(metrics.balances.assets).find(([key]) =>
+                        key.startsWith("USDC:"),
+                      )?.[1] || "0.00"
+                    : "0.00"}{" "}
+                  USDC
                 </span>
               </div>
               <div className="Dashboard__card__balance-item">

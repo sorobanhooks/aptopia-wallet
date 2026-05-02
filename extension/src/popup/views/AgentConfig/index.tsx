@@ -226,7 +226,7 @@ export const AgentConfig = () => {
                       </Field>
                     </div>
 
-                    <div className="AgentConfig__rule-field">
+                    {/* <div className="AgentConfig__rule-field">
                       <label className="AgentConfig__rule-label">{t("Max USDC per confirm (Tier 2) buy:")}</label>
                       <Field name="blockThreshold">
                         {({ field }: FieldProps) => (
@@ -240,7 +240,7 @@ export const AgentConfig = () => {
                           />
                         )}
                       </Field>
-                    </div>
+                    </div> */}
 
                     <div className="AgentConfig__rule-field">
                       <label className="AgentConfig__rule-label">{t("Max USDC spend on buys per UTC day:")}</label>
@@ -319,7 +319,7 @@ export const AgentConfig = () => {
                 <div className="AgentConfig--section--subtitle" style={{ marginBottom: "16px" }}>
                   {t("Revoking the agent wallet will permanently remove its access to your funds and disable all automated features.")}
                 </div>
-                
+
                 {revokeError && (
                   <div className="AgentConfig__revoke-error">
                     <Notification variant="error" title={revokeError} />
