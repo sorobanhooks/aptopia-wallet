@@ -2,6 +2,7 @@ import { Agent, IAgent } from './db';
 import { ChainFactory } from './chains/chain-factory';
 import { WorkerManager } from './worker-manager';
 import { clearPendingTier2Trade } from './pending-tier2';
+import { decryptAgentSecret } from './agent-secret-crypto';
 
 export type RevokeAgentResult = {
   transfers: { token: string; amount: string; txHash: string }[];
@@ -20,7 +21,7 @@ export async function revokeAgentWallet(agent: IAgent): Promise<RevokeAgentResul
 
   try {
     const { transfers } = await chain.transferAllAssets(
-      agent.agentSecret,
+      decryptAgentSecret(agent),
       agent.targetWallet
     );
 

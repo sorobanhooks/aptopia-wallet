@@ -1,0 +1,19 @@
+[package]
+name = "baku-blend-strategy"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Strategy adapter that supplies the vault's underlying asset to a Blend lending pool."
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+soroban-sdk = { workspace = true }
+baku-strategy-trait = { workspace = true }
+blend-contract-sdk = { workspace = true }
+
+[dev-dependencies]
+soroban-sdk = { workspace = true, features = ["testutils"] }

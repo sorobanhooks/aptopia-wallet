@@ -1,0 +1,30 @@
+---
+id: usingFreighterBrowser
+title: Using Freighter in the browser
+---
+
+import { VersionedUrl } from "./basics/VersionedUrl";
+
+We now have an extension installed on our machine and a library to interact with it. This library will provide you methods to send and receive data from a user's extension in your website or application.
+
+### Importing
+
+First import the library in the `<head>` tag of your page.
+
+Install the packaged library via `script` tag using cdnjs. For example, use the following code to install the [latest freighter api version](https://www.npmjs.com/package/@stellar/freighter-api?activeTab=versions):
+
+<VersionedUrl />
+
+_NOTE:_ You can swap in another desired version number but you must use at least version `1.1.2` or above.
+
+This will expose a global variable called `window.freighterApi` that will contain our library.
+
+The call signatures will be exactly the same as the [node version](./usingFreighterWebApp), but you will call the methods directly from `window.freighterApi`:
+
+For example:
+
+```javascript
+if (await window.freighterApi.isConnected()) {
+  alert("User has Freighter!");
+}
+```

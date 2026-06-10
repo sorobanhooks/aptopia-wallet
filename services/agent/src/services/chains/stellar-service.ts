@@ -7,7 +7,6 @@ import {
   BASE_FEE,
   Horizon,
 } from 'stellar-sdk';
-import axios from 'axios';
 import {
   IChainService,
   Balances,
@@ -20,6 +19,33 @@ const STELLAR_SCALE = 7;
 const BASE_RESERVE_XLM = Number(process.env.STELLAR_BASE_RESERVE_XLM || 0.5);
 const XLM_FEE_BUFFER = Number(process.env.STELLAR_XLM_FEE_BUFFER || 0.01);
 
+/** Circle USDC on Stellar (see https://centre.io/.well-known/stellar.toml) */
+const STELLAR_MAINNET_USDC_ISSUER =
+  'GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN';
+/** Common testnet USDC issuer (Circle / docs; ends in FLA5) */
+const STELLAR_TESTNET_USDC_ISSUER =
+  'GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5';
+
+function resolveUsdcIssuer(isPubnet: boolean): string {
+  const fromEnv = process.env.USDC_ASSET_ISSUER?.trim();
+  if (fromEnv) {
+    if (isPubnet && fromEnv === STELLAR_TESTNET_USDC_ISSUER) {
+      console.warn(
+        '[StellarService] USDC_ASSET_ISSUER is the known testnet Circle USDC address; using mainnet issuer because NETWORK=stellar:pubnet.'
+      );
+      return STELLAR_MAINNET_USDC_ISSUER;
+    }
+    if (!isPubnet && fromEnv === STELLAR_MAINNET_USDC_ISSUER) {
+      console.warn(
+        '[StellarService] USDC_ASSET_ISSUER is the known mainnet Circle USDC address; using testnet issuer on testnet.'
+      );
+      return STELLAR_TESTNET_USDC_ISSUER;
+    }
+    return fromEnv;
+  }
+  return isPubnet ? STELLAR_MAINNET_USDC_ISSUER : STELLAR_TESTNET_USDC_ISSUER;
+}
+
 export class StellarService implements IChainService {
   private server: Horizon.Server;
   private networkPassphrase: string;
@@ -27,34 +53,36 @@ export class StellarService implements IChainService {
 
   constructor() {
     const network = process.env.NETWORK || 'stellar:testnet';
-    this.networkPassphrase = network === 'stellar:public' ? Networks.PUBLIC : Networks.TESTNET;
+    const isPubnet = network === 'stellar:pubnet';
+    this.networkPassphrase = isPubnet ? Networks.PUBLIC : Networks.TESTNET;
     this.server = new Horizon.Server(
-      network === 'stellar:public'
-        ? 'https://horizon.stellar.org'
-        : 'https://horizon-testnet.stellar.org'
+      isPubnet ? 'https://horizon.stellar.org' : 'https://horizon-testnet.stellar.org'
     );
     this.usdcAsset = new Asset(
       process.env.USDC_ASSET_CODE || 'USDC',
-      process.env.USDC_ASSET_ISSUER || 'GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5'
+      resolveUsdcIssuer(isPubnet)
     );
   }
 
   async createAgentWallet(): Promise<{ address: string; secret: string }> {
     const pair = Keypair.random();
-    const address = pair.publicKey();
-    const secret = pair.secret();
+    return { address: pair.publicKey(), secret: pair.secret() };
+  }
 
-    // Fund via Friendbot on testnet
-    if (this.networkPassphrase === Networks.TESTNET) {
-      try {
-        await axios.get(`https://friendbot.stellar.org?addr=${address}`);
-        console.log(`Funded agent ${address} via Friendbot`);
-      } catch (e) {
-        console.error('Friendbot funding failed', e);
+  private accountHasUsdcTrustline(account: Horizon.AccountResponse): boolean {
+    for (const balance of account.balances) {
+      if (balance.asset_type === 'native' || balance.asset_type === 'liquidity_pool_shares') {
+        continue;
+      }
+      const b = balance as { asset_code?: string; asset_issuer?: string };
+      if (
+        b.asset_code === this.usdcAsset.getCode() &&
+        b.asset_issuer === this.usdcAsset.getIssuer()
+      ) {
+        return true;
       }
     }
-
-    return { address, secret };
+    return false;
   }
 
   async getBalance(address: string): Promise<Balances> {
@@ -94,7 +122,15 @@ export class StellarService implements IChainService {
 
   async setupAgent(secret: string): Promise<void> {
     const pair = Keypair.fromSecret(secret);
-    const account = await this.server.loadAccount(pair.publicKey());
+    const pubkey = pair.publicKey();
+    const account = await this.server.loadAccount(pubkey);
+
+    if (this.accountHasUsdcTrustline(account)) {
+      console.log(`USDC trustline already present for ${pubkey}`);
+      return;
+    }
+
+    this.assertNativeBalanceForNewTrustline(account);
 
     const transaction = new TransactionBuilder(account, {
       fee: BASE_FEE,
@@ -105,12 +141,33 @@ export class StellarService implements IChainService {
           asset: this.usdcAsset,
         })
       )
-      .setTimeout(30)
+      .setTimeout(180)
       .build();
 
     transaction.sign(pair);
     await this.server.submitTransaction(transaction);
-    console.log(`USDC Trustline established for ${pair.publicKey()}`);
+    console.log(`USDC Trustline established for ${pubkey}`);
+  }
+
+  /**
+   * After adding one trustline, minimum balance is (2 + subentry_count + 1) × base_reserve.
+   * Reject early with a clear message (avoids opaque Horizon tx failures when balance is ~1 XLM).
+   */
+  private assertNativeBalanceForNewTrustline(account: Horizon.AccountResponse): void {
+    const native = account.balances.find((b) => b.asset_type === 'native') as
+      | { balance: string }
+      | undefined;
+    const nativeBal = Number(native?.balance ?? 0);
+    const subentries = account.subentry_count;
+    const minBalanceAfter = (2 + subentries + 1) * BASE_RESERVE_XLM;
+    const feeStroops = Number(BASE_FEE);
+    const feeXlm = Number.isFinite(feeStroops) ? feeStroops / 10_000_000 : 0.000_01;
+    const required = minBalanceAfter + feeXlm;
+    if (nativeBal + 1e-8 < required) {
+      throw new Error(
+        `Insufficient XLM for a USDC trustline: balance is ${nativeBal} XLM but about ${required.toFixed(2)} XLM is needed after the trustline (ledger minimum balance + fee). Send more XLM to this address and run /createtrustline again.`
+      );
+    }
   }
 
   private floorStellarAmount(value: number): string {

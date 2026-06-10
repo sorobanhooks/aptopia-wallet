@@ -1,0 +1,18 @@
+[package]
+name = "baku-defindex-strategy"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Strategy adapter that supplies the vault's underlying asset to a DeFindex strategy contract."
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+soroban-sdk = { workspace = true }
+baku-strategy-trait = { workspace = true }
+
+[dev-dependencies]
+soroban-sdk = { workspace = true, features = ["testutils"] }

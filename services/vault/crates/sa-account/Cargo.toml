@@ -1,0 +1,44 @@
+# Self-contained, NON-workspace deployable Smart Account contract crate.
+#
+# IMPORTANT (parallel-safety): the empty `[workspace]` table below DETACHES this
+# crate from the parent Cargo workspace at /Cargo.toml. It therefore has its own
+# target dir and its own Cargo.lock — no build-lock contention with the sibling
+# P3 agent editing crates/sa-tracer/** and api/** in the parent workspace.
+#
+# This crate is a THIN deployable wrapper around the OpenZeppelin
+# `stellar-accounts` library (a library, not a deployable contract). It wires the
+# OZ Smart Account `do_check_auth` + the `SmartAccount` contracttrait management
+# surface into a real contract and adds a constructor that installs ONE
+# policy-less, CallContract-scoped context rule with a single External-Ed25519
+# agent signer. Auth is NOT hand-rolled: __check_auth delegates verbatim to the
+# OZ `do_check_auth` (smart_account/storage.rs:462), which computes the
+# rule-bound auth_digest the off-chain signer must reproduce.
+[workspace]
+
+[package]
+name = "sa-account"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.85"
+license = "MIT"
+description = "Deployable OZ Smart Account wrapper: one policy-less CallContract-scoped rule, one External-Ed25519 agent signer. M1 auth-digest tracer (P2)."
+
+[lib]
+crate-type = ["cdylib"]
+doctest = false
+
+[dependencies]
+# Pin to the exact versions the parent workspace + the validated P1 tracer use.
+# Must NOT bump soroban-sdk off 25.3.1 (OZ 0.7.1 line targets soroban-sdk 25.3.0/.1).
+soroban-sdk = "=25.3.1"
+stellar-accounts = "=0.7.1"
+
+[profile.release]
+opt-level = "z"
+overflow-checks = true
+debug = 0
+strip = "symbols"
+debug-assertions = false
+panic = "abort"
+codegen-units = 1
+lto = true

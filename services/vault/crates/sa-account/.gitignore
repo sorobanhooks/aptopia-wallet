@@ -1,0 +1,10 @@
+# Build artifacts for this self-contained (non-workspace) crate and its nested
+# verifier crate. The root .gitignore only ignores the root-anchored /target/,
+# so these nested target dirs must be ignored locally.
+/target/
+verifier/target/
+
+# Cargo.lock for these detached binary-ish (cdylib) contract crates is a build
+# artifact for a from-scratch tracer redeploy; not committed.
+Cargo.lock
+verifier/Cargo.lock

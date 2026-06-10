@@ -1,0 +1,56 @@
+name: Deploy @stellar/freighter-api beta
+on:
+  workflow_dispatch:
+    inputs:
+      release:
+        description: Release Number
+        default: "2.0.0"
+        required: true
+      version:
+        description: Beta version
+        default: "0"
+        required: true
+jobs:
+  bump-version:
+    name: Checkout code
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+        with:
+          ref: release/${{ github.event.inputs.release }}
+          fetch-depth: 0
+      - name: Enable Corepack
+        run: corepack enable
+      - name: Build package
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          registry-url: "https://registry.npmjs.org"
+          always-auth: true
+      - name: Version npm package
+        run: |
+          cd @stellar/freighter-api
+          yarn version ${{ github.event.inputs.release }}-beta.${{ github.event.inputs.version }}
+          cd ../../
+      - run: yarn && yarn build:freighter-api
+      - name: Publish npm package
+        run: |
+          cd @stellar/freighter-api
+          npm publish --access public --tag beta
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+      - name: Slack Notification
+        uses: rtCamp/action-slack-notify@e31e87e03dd19038e411e38ae27cbad084a90661 #v2.3.3
+        env:
+          MSG_MINIMAL: true
+          SLACK_CHANNEL: team-wallet-eng
+          SLACK_COLOR: "#70E1C8"
+          SLACK_ICON: https://github.com/stellar/freighter/blob/master/docs/static/images/logo.png?size=48
+          SLACK_MESSAGE:
+            "https://github.com/stellar/freighter/releases/tag/${{
+            github.event.inputs.release }}-beta.${{ github.event.inputs.version
+            }}"
+          SLACK_TITLE: "@stellar/freighter-api beta has been deployed to npm!"
+          SLACK_USERNAME: Freighter Administrative Assistant
+          SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK }}

@@ -1,0 +1,21 @@
+[package]
+name = "baku-allocator-strategy"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Weighted meta-allocator Strategy. Splits one deposit across N child strategies + a native sleeve by configurable bps weights."
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+soroban-sdk = { workspace = true }
+baku-strategy-trait = { workspace = true }
+
+[dev-dependencies]
+soroban-sdk = { workspace = true, features = ["testutils"] }
+baku-mock-strategy = { workspace = true }
+baku-soroswap-strategy = { workspace = true }
+baku-vault = { workspace = true }

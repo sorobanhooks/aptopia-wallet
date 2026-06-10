@@ -1,0 +1,58 @@
+name: Deploy @stellar/freighter-api
+on:
+  workflow_dispatch:
+    inputs:
+      release:
+        description: Release Number
+        default: "2.0.0"
+        required: true
+jobs:
+  bump-version:
+    name: Checkout code
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - name: Enable Corepack
+        run: corepack enable
+      - name: Build package
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          registry-url: "https://registry.npmjs.org"
+          always-auth: true
+      - name: Version npm package
+        run: |
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          cd @stellar/freighter-api
+          yarn version ${{ github.event.inputs.release }}
+          cd ../../
+      - run: yarn && yarn build:freighter-api
+      - name: Publish npm package
+        run: |
+          cd @stellar/freighter-api
+          npm publish --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+      - name: Create Pull Request
+        uses: peter-evans/create-pull-request@84ae59a2cdc2258d6fa0732dd66352dddae2a412 #v7.0.9
+        with:
+          title:
+            Bump @stellar/freighter-api version to ${{
+            github.event.inputs.version }}
+      - name: Slack Notification
+        uses: rtCamp/action-slack-notify@e31e87e03dd19038e411e38ae27cbad084a90661 #v2.3.3
+        env:
+          MSG_MINIMAL: true
+          SLACK_CHANNEL: release
+          SLACK_COLOR: "#70E1C8"
+          SLACK_ICON: https://github.com/stellar/freighter/blob/master/docs/static/images/logo.png?size=48
+          SLACK_MESSAGE:
+            "https://github.com/stellar/freighter/releases/tag/${{
+            github.event.inputs.release }}"
+          SLACK_TITLE: "@stellar/freighter-api has been deployed to npm!"
+          SLACK_USERNAME: Freighter Administrative Assistant
+          SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK }}

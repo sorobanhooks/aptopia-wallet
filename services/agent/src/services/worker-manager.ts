@@ -1,6 +1,7 @@
 import { Agent, AgentLog } from './db';
 import { fetchPrice } from './x402-client';
 import { ChainFactory } from './chains/chain-factory';
+import { decryptAgentSecret } from './agent-secret-crypto';
 import { evaluateUsdcBalance } from './chains/usdc-balance-eval';
 import { bot } from './bot';
 import { maybeSendLowBalanceAlert } from './low-balance-alert';
@@ -51,7 +52,10 @@ export class WorkerManager {
   }
 
   static async initAllWorkers() {
-    const activeAgents = await Agent.find({ active: true });
+    const activeAgents = await Agent.find({
+      active: true,
+      usdcTrustlineReady: { $ne: false },
+    });
     for (const agent of activeAgents) {
       this.startAgentWorker(agent);
     }
@@ -59,14 +63,21 @@ export class WorkerManager {
   }
 
   static startAgentWorker(agent: any) {
-    if (this.activeWorkers.has(agent.id)) {
-      clearInterval(this.activeWorkers.get(agent.id)!);
+    const agentId = String(agent.id ?? agent._id);
+
+    if (agent.usdcTrustlineReady === false) {
+      this.stopAgentWorker(agentId);
+      return;
+    }
+
+    if (this.activeWorkers.has(agentId)) {
+      clearInterval(this.activeWorkers.get(agentId)!);
     }
 
     const interval = setInterval(async () => {
       try {
-        const fresh = await Agent.findById(agent.id);
-        if (!fresh || !fresh.active) {
+        const fresh = await Agent.findById(agentId);
+        if (!fresh || !fresh.active || fresh.usdcTrustlineReady === false) {
           return;
         }
 
@@ -83,7 +94,7 @@ export class WorkerManager {
         const evaluation = evaluateUsdcBalance(balances.usdc);
         await maybeSendLowBalanceAlert(fresh, evaluation);
 
-        const priceData = await fetchPrice(fresh.agentSecret);
+        const priceData = await fetchPrice(decryptAgentSecret(fresh));
         const currentPrice = parseUsdPriceFromAlert(priceData);
         if (currentPrice === null) {
           console.error(
@@ -121,11 +132,11 @@ export class WorkerManager {
           );
         }
       } catch (error) {
-        console.error(`Error in worker for agent ${agent.id}:`, error);
+        console.error(`Error in worker for agent ${agentId}:`, error);
       }
     }, 30000);
 
-    this.activeWorkers.set(agent.id, interval);
+    this.activeWorkers.set(agentId, interval);
   }
 
   private static async handleBuySignal(
@@ -170,7 +181,7 @@ export class WorkerManager {
       const actionLabel = 'Buy XLM';
       try {
         const txHash = await chainService.executeSwap(
-          agent.agentSecret,
+          decryptAgentSecret(agent),
           'buy_xlm',
           route.usdc
         );
@@ -288,7 +299,7 @@ export class WorkerManager {
       console.log(`${tierLabel} sell for ${agent.agentAddress}: ${route.xlm} XLM`);
       try {
         const txHash = await chainService.executeSwap(
-          agent.agentSecret,
+          decryptAgentSecret(agent),
           'sell_xlm',
           route.xlm
         );

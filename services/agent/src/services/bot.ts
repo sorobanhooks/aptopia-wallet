@@ -1,6 +1,8 @@
 import { Telegraf } from 'telegraf';
+import { NotFoundError } from 'stellar-sdk';
 import { Agent, AgentLog } from './db';
 import { ChainFactory } from './chains/chain-factory';
+import { encryptAgentSecret, decryptAgentSecret } from './agent-secret-crypto';
 import { WorkerManager } from './worker-manager';
 import { formatAgentLogLineTime } from '../utils/agent-log-display';
 import { TradeDirection } from './chains/types';
@@ -48,6 +50,51 @@ function getTradeActionLabel(direction: TradeDirection): string {
   return direction === 'buy_xlm' ? 'Buy XLM' : 'Sell XLM';
 }
 
+function stellarNetworkLabel(): string {
+  const n = process.env.NETWORK || 'stellar:testnet';
+  return n === 'stellar:pubnet' ? 'Stellar public (mainnet)' : 'Stellar testnet';
+}
+
+function horizonFailedTxExtras(error: unknown): unknown {
+  const e = error as {
+    response?: { data?: { extras?: unknown } };
+    getResponse?: () => { data?: { extras?: unknown } };
+  };
+  return (
+    e?.response?.data?.extras ??
+    (typeof e?.getResponse === 'function' ? e.getResponse()?.data?.extras : undefined)
+  );
+}
+
+function horizonOperationResultCodes(extras: unknown): string[] {
+  if (!extras || typeof extras !== 'object') return [];
+  const ops = (extras as { result_codes?: { operations?: unknown } }).result_codes?.operations;
+  if (Array.isArray(ops)) return ops.filter((x): x is string => typeof x === 'string');
+  if (typeof ops === 'string') return [ops];
+  return [];
+}
+
+function formatTrustlineSetupError(error: unknown, agentAddress: string): string {
+  if (error instanceof NotFoundError) {
+    return `This address is not on the network yet. Fund the agent wallet with XLM first:\n${agentAddress}`;
+  }
+
+  const opCodes = horizonOperationResultCodes(horizonFailedTxExtras(error));
+  if (opCodes.length > 0) {
+    if (opCodes.some((c) => c === 'op_underfunded')) {
+      return 'Not enough XLM for fees or reserve. Send more XLM (typically ~2+ XLM before /createtrustline on mainnet), then retry.';
+    }
+    if (opCodes.some((c) => c === 'op_low_reserve')) {
+      return 'Insufficient reserve for adding a trustline (after the change, minimum balance rises). Send more XLM to the agent address (often ~2+ XLM total on mainnet) and retry.';
+    }
+  }
+
+  if (error instanceof Error) {
+    return error.message;
+  }
+  return String(error);
+}
+
 function formatAssetBalances(assets?: Record<string, string>): string {
   if (!assets || Object.keys(assets).length === 0) {
     return 'Balances:\n- unavailable';
@@ -62,7 +109,7 @@ function formatAssetBalances(assets?: Record<string, string>): string {
 
 bot.start((ctx) => {
   ctx.reply(
-    'Welcome to X402 Proxy Agent Bot!\n\nCommands:\n/createagent <target_wallet> - Setup a new XLM trading agent\n/setrules - Configure buy/sell thresholds, tier limits, daily USDC spend cap, and per-trade amounts\n/revokeagent - Drain transferable assets to main wallet and disable the agent\n/status - Check your agents\n/agentlog - Recent trade activity'
+    'Welcome to X402 Proxy Agent Bot!\n\nCommands:\n/createagent <target_wallet> - Create agent keys; fund the address, then /createtrustline\n/createtrustline - Add USDC trustline after the agent wallet is funded\n/setrules - Configure buy/sell thresholds, tier limits, daily USDC spend cap, and per-trade amounts\n/revokeagent - Drain transferable assets to main wallet and disable the agent\n/status - Check your agents\n/agentlog - Recent trade activity'
   );
 });
 
@@ -89,16 +136,16 @@ bot.command('createagent', async (ctx) => {
 
     const chainService = ChainFactory.getService('stellar');
     const { address, secret } = await chainService.createAgentWallet();
+    const encryptedSecret = encryptAgentSecret(secret);
 
-    await chainService.setupAgent(secret);
-
-    const agent = await Agent.create({
+    await Agent.create({
       telegramId,
       agentAddress: address,
-      agentSecret: secret,
+      ...encryptedSecret,
       targetWallet,
       token,
       active: true,
+      usdcTrustlineReady: false,
       tier1Max: 0,
       tier2Max: 0,
       buyBelowUsd: 0,
@@ -111,14 +158,67 @@ bot.command('createagent', async (ctx) => {
       totalSuccessfulTrades: 0,
     });
 
-    WorkerManager.startAgentWorker(agent);
-
+    const network = stellarNetworkLabel();
     ctx.reply(
-      `✅ Agent Created!\nAddress: ${address}\nTarget: ${targetWallet}\nToken: XLM\nRun /setrules to configure trading limits before auto-trades use your budget.`
+      [
+        `✅ Agent wallet created (pending funding).`,
+        '',
+        `Network: ${network}`,
+        `Fund this agent address with enough XLM (mainnet typically ~2 XLM minimum so that after adding a USDC trustline reserves + fee remain covered):`,
+        address,
+        '',
+        `Payout / main wallet (target): ${targetWallet}`,
+        '',
+        `Next: send XLM to the agent address above, then run /createtrustline`,
+        `After that run /setrules to configure trading limits.`,
+      ].join('\n')
     );
   } catch (error) {
     console.error('Failed to create agent:', error);
     ctx.reply('❌ Failed to create agent. Check console for details.');
+  }
+});
+
+bot.command('createtrustline', async (ctx) => {
+  if (!ctx.from?.id) {
+    return ctx.reply('Could not determine your Telegram user id.');
+  }
+
+  const telegramId = ctx.from.id.toString();
+
+  try {
+    const agent = await Agent.findOne({ telegramId, active: true });
+    if (!agent) {
+      return ctx.reply('No active agent. Create one with /createagent <target_wallet> first.');
+    }
+
+    if (agent.usdcTrustlineReady === true) {
+      return ctx.reply(
+        `USDC trustline is already set up for:\n${agent.agentAddress}\nRun /setrules if you still need to configure trading limits.`
+      );
+    }
+
+    const chainService = ChainFactory.getService(agent.chain || 'stellar');
+    await chainService.setupAgent(decryptAgentSecret(agent));
+
+    const updated = await Agent.findByIdAndUpdate(
+      agent._id,
+      { $set: { usdcTrustlineReady: true } },
+      { new: true }
+    );
+
+    if (updated?.active) {
+      WorkerManager.startAgentWorker(updated);
+    }
+
+    return ctx.reply(
+      `✅ USDC trustline added for:\n${agent.agentAddress}\n\nRun /setrules to configure limits. Trading worker is enabled.`
+    );
+  } catch (error) {
+    console.error('createtrustline failed:', error);
+    const fallbackAgent = await Agent.findOne({ telegramId, active: true });
+    const addr = fallbackAgent?.agentAddress ?? '(unknown)';
+    ctx.reply(`❌ Could not create USDC trustline.\n${formatTrustlineSetupError(error, addr)}`);
   }
 });
 
@@ -144,8 +244,12 @@ bot.command('status', async (ctx) => {
       a.dailyBudget > 0
         ? `Today USDC spend: ${a.spentToday.toFixed(4)} / ${a.dailyBudget.toFixed(2)} (limit)`
         : 'Today USDC spend: (set daily limit via /setrules)';
+    const trustLine =
+      a.usdcTrustlineReady === false
+        ? 'USDC trustline: pending — fund agent, then /createtrustline'
+        : 'USDC trustline: ready';
     lines.push(
-      `🤖 Agent: ${a.agentAddress.slice(0, 6)}...${a.agentAddress.slice(-4)}\nToken: XLM\nTarget: ${a.targetWallet.slice(0, 6)}...\nStatus: ${a.active ? '✅ Active' : '❌ Disabled'}\n${balancesText}\n${spendLine}\nSuccessful trades (lifetime): ${a.totalSuccessfulTrades ?? 0}`
+      `🤖 Agent: ${a.agentAddress.slice(0, 6)}...${a.agentAddress.slice(-4)}\nToken: XLM\nTarget: ${a.targetWallet.slice(0, 6)}...\nStatus: ${a.active ? '✅ Active' : '❌ Disabled'}\n${trustLine}\n${balancesText}\n${spendLine}\nSuccessful trades (lifetime): ${a.totalSuccessfulTrades ?? 0}`
     );
   }
 
@@ -355,12 +459,12 @@ bot.on('text', async (ctx, next) => {
 
     setRulesSessions.delete(telegramId);
 
-    if (updatedAgent?.active) {
+    if (updatedAgent?.active && updatedAgent.usdcTrustlineReady !== false) {
       WorkerManager.startAgentWorker(updatedAgent);
     }
 
     return ctx.reply(
-      `✅ Rules updated.\nBuy below: ${session.buyBelowUsd} USD\nSell above: ${session.sellAboveUsd} USD\nTier 1 (auto) max: ${session.tier1Max} USD per trade\nTier 2 (confirm) max: ${session.tier2Max} USD per trade\nDaily USDC spend limit: ${session.dailyBudget} USD\nSell amount: ${session.sellAmountXlm} XLM per trade\nBuy amount: ${session.buyAmountUsdc} USDC per trade`
+      `✅ Rules updated.\nBuy below: ${session.buyBelowUsd} USD\nSell above: ${session.sellAboveUsd} USD\nTier 1 (auto) max: ${session.tier1Max} USD per trade\nTier 2 (confirm) max: ${session.tier2Max} USD per trade\nDaily USDC spend limit: ${session.dailyBudget} USD\nSell amount: ${session.sellAmountXlm} XLM per trade\nBuy amount: ${session.buyAmountUsdc} USDC per trade${updatedAgent?.usdcTrustlineReady === false ? '\n\nNote: run /createtrustline after funding so the worker can trade.' : ''}`
     );
   }
 
@@ -436,20 +540,24 @@ bot.on('callback_query', async (ctx: any) => {
     if (direction === 'buy_xlm') {
       const amount = pending.buyUsdc;
       if (!amount) {
+        // C1: claim synchronously before any await
         WorkerManager.clearTier2Direction(agentId);
         clearPendingTier2Trade(agentId);
         return ctx.reply('Missing buy amount; please wait for a new prompt.');
       }
+      // C1: CLAIM — clear the pending slot BEFORE the async swap so a concurrent
+      //     HTTP confirm in the same event-loop window cannot double-execute.
+      const capturedAmount = amount;
+      clearPendingTier2Trade(agentId);
+      WorkerManager.clearTier2Direction(agentId);
       try {
         const txHash = await chainService.executeSwap(
-          agent.agentSecret,
+          decryptAgentSecret(agent),
           'buy_xlm',
-          amount
+          capturedAmount
         );
-        const usdcSpent = parseFloat(amount);
+        const usdcSpent = parseFloat(capturedAmount);
         await recordSuccessfulBuy(agentId, usdcSpent);
-        clearPendingTier2Trade(agentId);
-        WorkerManager.clearTier2Direction(agentId);
         await AgentLog.create({
           agentId: agent._id,
           telegramId: agent.telegramId,
@@ -457,16 +565,14 @@ bot.on('callback_query', async (ctx: any) => {
           eventType: 'trade',
           status: 'success',
           token: agent.token,
-          amount: `${getTradeActionLabel(direction)} (${amount} USDC)`,
+          amount: `${getTradeActionLabel(direction)} (${capturedAmount} USDC)`,
           txHash,
         });
         ctx.reply(
-          `✅ ${getTradeActionLabel(direction)} confirmed and executed.\nAmount: ${amount} USDC\nTx: ${txHash}`
+          `✅ ${getTradeActionLabel(direction)} confirmed and executed.\nAmount: ${capturedAmount} USDC\nTx: ${txHash}`
         );
       } catch (e: unknown) {
         const reason = e instanceof Error ? e.message : String(e);
-        clearPendingTier2Trade(agentId);
-        WorkerManager.clearTier2Direction(agentId);
         await AgentLog.create({
           agentId: agent._id,
           telegramId: agent.telegramId,
@@ -474,27 +580,30 @@ bot.on('callback_query', async (ctx: any) => {
           eventType: 'trade',
           status: 'failure',
           token: agent.token,
-          amount: `${getTradeActionLabel(direction)} (${amount} USDC)`,
+          amount: `${getTradeActionLabel(direction)} (${capturedAmount} USDC)`,
           reason,
         });
-        ctx.reply(`❌ Trade failed.\nAmount: ${amount} USDC\nReason: ${reason}`);
+        ctx.reply(`❌ Trade failed.\nAmount: ${capturedAmount} USDC\nReason: ${reason}`);
       }
     } else {
       const amount = pending.sellXlm;
       if (!amount) {
+        // C1: claim synchronously before any await
         WorkerManager.clearTier2Direction(agentId);
         clearPendingTier2Trade(agentId);
         return ctx.reply('Missing sell amount; please wait for a new prompt.');
       }
+      // C1: CLAIM — clear the pending slot BEFORE the async swap
+      const capturedAmount = amount;
+      clearPendingTier2Trade(agentId);
+      WorkerManager.clearTier2Direction(agentId);
       try {
         const txHash = await chainService.executeSwap(
-          agent.agentSecret,
+          decryptAgentSecret(agent),
           'sell_xlm',
-          amount
+          capturedAmount
         );
         await recordSuccessfulSell(agentId);
-        clearPendingTier2Trade(agentId);
-        WorkerManager.clearTier2Direction(agentId);
         await AgentLog.create({
           agentId: agent._id,
           telegramId: agent.telegramId,
@@ -502,16 +611,14 @@ bot.on('callback_query', async (ctx: any) => {
           eventType: 'trade',
           status: 'success',
           token: agent.token,
-          amount: `${getTradeActionLabel(direction)} (${amount} XLM)`,
+          amount: `${getTradeActionLabel(direction)} (${capturedAmount} XLM)`,
           txHash,
         });
         ctx.reply(
-          `✅ ${getTradeActionLabel(direction)} confirmed and executed.\nAmount: ${amount} XLM\nTx: ${txHash}`
+          `✅ ${getTradeActionLabel(direction)} confirmed and executed.\nAmount: ${capturedAmount} XLM\nTx: ${txHash}`
         );
       } catch (e: unknown) {
         const reason = e instanceof Error ? e.message : String(e);
-        clearPendingTier2Trade(agentId);
-        WorkerManager.clearTier2Direction(agentId);
         await AgentLog.create({
           agentId: agent._id,
           telegramId: agent.telegramId,
@@ -519,10 +626,10 @@ bot.on('callback_query', async (ctx: any) => {
           eventType: 'trade',
           status: 'failure',
           token: agent.token,
-          amount: `${getTradeActionLabel(direction)} (${amount} XLM)`,
+          amount: `${getTradeActionLabel(direction)} (${capturedAmount} XLM)`,
           reason,
         });
-        ctx.reply(`❌ Trade failed.\nAmount: ${amount} XLM\nReason: ${reason}`);
+        ctx.reply(`❌ Trade failed.\nAmount: ${capturedAmount} XLM\nReason: ${reason}`);
       }
     }
   } else if (action === 'reject_trade') {

@@ -1,0 +1,18 @@
+[package]
+name = "baku-mock-strategy"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Test-only Strategy implementation. Holds tokens in-memory, supports admin inject_yield for simulated growth."
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+soroban-sdk = { workspace = true }
+baku-strategy-trait = { workspace = true }
+
+[dev-dependencies]
+soroban-sdk = { workspace = true, features = ["testutils"] }

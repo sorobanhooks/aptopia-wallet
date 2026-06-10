@@ -1,0 +1,8 @@
+[package]
+name = "baku-addresses"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Single source of truth for Baku contract addresses across Stellar networks."

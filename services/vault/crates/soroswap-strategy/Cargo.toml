@@ -1,0 +1,18 @@
+[package]
+name = "baku-soroswap-strategy"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Soroswap V2 LP strategy adapter: provides liquidity via add/remove_liquidity, holds LP tokens, earns the 0.30% trading fee."
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+soroban-sdk = { workspace = true }
+baku-strategy-trait = { workspace = true }
+
+[dev-dependencies]
+soroban-sdk = { workspace = true, features = ["testutils"] }

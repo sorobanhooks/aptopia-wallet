@@ -1,0 +1,36 @@
+# Rust / Cargo
+/target/
+**/*.rs.bk
+Cargo.lock.bak
+
+# Soroban / Stellar
+*.wasm
+.soroban/
+
+# Node / Bun
+node_modules/
+.next/
+dist/
+*.log
+
+# Env
+.env
+.env.local
+.env.*.local
+
+# Smart Account tracer env — holds the throwaway agent Ed25519 SECRET. Never commit.
+scripts/.sa-tracer.env
+
+# IDE
+.idea/
+.vscode/
+*.swp
+.DS_Store
+
+# gstack vendored skills already committed; ignore stack runtime junk
+.gstack/
+
+# Test artifacts
+coverage/
+.nyc_output/
+test_snapshots/

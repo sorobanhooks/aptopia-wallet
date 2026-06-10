@@ -1,0 +1,45 @@
+# Local development for the Baku API.
+#
+#   docker compose up        # build (first run) + start with hot reload
+#   docker compose up --build  # force rebuild after dependency changes
+#   docker compose down      # stop and remove container
+#
+# Live reload: the project directory is bind-mounted into /app, and the
+# container runs `bun --watch` which restarts the process on any file edit.
+# `node_modules` is an anonymous volume so the container's installed deps
+# are not shadowed by the host's (which may be installed for a different
+# architecture or be absent entirely).
+
+services:
+  baku-api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: baku-api:dev
+    container_name: baku-api
+    ports:
+      - "8787:8787"
+    environment:
+      PORT: "8787"
+      NETWORK: "${NETWORK:-testnet}"
+      SOROBAN_RPC_URL: "${SOROBAN_RPC_URL:-https://soroban-testnet.stellar.org}"
+      ADMIN_ADDR: "${ADMIN_ADDR:-GCWHACNPCEV6FPANBP3WMHFSR3LXMZO5CNIZNEKEKV7PAM2TBJ5HEVTV}"
+      # Uncomment for mainnet:
+      # NETWORK_PASSPHRASE: "Public Global Stellar Network ; September 2015"
+    env_file:
+      # Optional: create api/.env to override any of the above.
+      - path: .env
+        required: false
+    volumes:
+      # Live source mount — edits on the host are reflected inside the
+      # container immediately, and `bun --watch` restarts the process.
+      - .:/app
+      # Keep the container's installed node_modules out of the bind mount.
+      - /app/node_modules
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8787/health"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 5s

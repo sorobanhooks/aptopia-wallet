@@ -1,0 +1,159 @@
+name: Beta Deployment
+env:
+  INDEXER_URL: ${{ secrets.INDEXER_URL }}
+  INDEXER_V2_URL: ${{ secrets.INDEXER_V2_BETA_URL }}
+on:
+  workflow_dispatch:
+    inputs:
+      release:
+        description: Release Number
+        default: "2.0.0"
+        required: true
+      version:
+        description: Beta version
+        default: "0"
+        required: true
+jobs:
+  bump-version:
+    name: Bump Package Version and Submit Extension
+    runs-on: ubuntu-latest
+    steps:
+      - if: ${{ env.INDEXER_URL == '' }}
+        run: |
+          echo "Missing INDEXER_URL"
+          gh run cancel ${{ github.run_id }}
+          gh run watch ${{ github.run_id }}
+      - if: ${{ env.INDEXER_V2_URL == '' }}
+        run: |
+          echo "Missing INDEXER_V2_URL"
+          gh run cancel ${{ github.run_id }}
+          gh run watch ${{ github.run_id }}
+      - name: Checkout code
+        uses: actions/checkout@v6
+        with:
+          ref: release/${{ github.event.inputs.release }}
+      - name: Update manifest-v2.json name
+        uses: jossef/action-set-json-field@2a0f7d953b580b828717daf4de7fafc7e4135e97 #v2
+        with:
+          file: ./extension/public/static/manifest/v2.json
+          field: name
+          value: Freighter BETA
+      - name: Update manifest-v3.json name
+        uses: jossef/action-set-json-field@2a0f7d953b580b828717daf4de7fafc7e4135e97 #v2
+        with:
+          file: ./extension/public/static/manifest/v3.json
+          field: name
+          value: Freighter BETA
+      - name: Update manifest-v2.json version_name
+        uses: jossef/action-set-json-field@2a0f7d953b580b828717daf4de7fafc7e4135e97 #v2
+        with:
+          file: ./extension/public/static/manifest/v2.json
+          field: version_name
+          value:
+            ${{ github.event.inputs.release }}-beta.${{
+            github.event.inputs.version }}
+      - name: Update manifest-v3.json version_name
+        uses: jossef/action-set-json-field@2a0f7d953b580b828717daf4de7fafc7e4135e97 #v2
+        with:
+          file: ./extension/public/static/manifest/v3.json
+          field: version_name
+          value:
+            ${{ github.event.inputs.release }}-beta.${{
+            github.event.inputs.version }}
+      - name: Update manifest-v2.json version for Chrome
+        uses: jossef/action-set-json-field@2a0f7d953b580b828717daf4de7fafc7e4135e97 #v2
+        with:
+          file: ./extension/public/static/manifest/v2.json
+          field: version
+          value:
+            ${{ github.event.inputs.release }}.${{ github.event.inputs.version
+            }}
+      - name: Update manifest-v3.json version for Chrome
+        uses: jossef/action-set-json-field@2a0f7d953b580b828717daf4de7fafc7e4135e97 #v2
+        with:
+          file: ./extension/public/static/manifest/v3.json
+          field: version
+          value:
+            ${{ github.event.inputs.release }}.${{ github.event.inputs.version
+            }}
+      - name: Enable Corepack
+        run: corepack enable
+      - name: Build extension
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+      - run: >
+          yarn && yarn build:freighter-api && yarn build:extension:production
+          --env AMPLITUDE_KEY="${{ secrets.AMPLITUDE_KEY }}"
+          AMPLITUDE_EXPERIMENT_DEPLOYMENT_KEY="${{
+          secrets.AMPLITUDE_EXPERIMENT_DEPLOYMENT_KEY }}" BUILD_TYPE="beta"
+      - name: Use BETA icons
+        run: |
+          rm -rf ./extension/build/images
+          mv ./extension/build/beta_images ./extension/build/images
+      - name: Remove scripts tag
+        uses: restackio/update-json-file-action@f8ef1561cb15ba86a6367b547216375bc60e7f91 #v2.1
+        with:
+          file: ./extension/build/manifest.json
+          fields: '{"background": {"service_worker": "background.min.js"}}'
+      - name: Install zip
+        uses: montudor/action-zip@0852c26906e00f8a315c704958823928d8018b28 #v1.0.0
+      - name: Zip extension build
+        run: zip -qq -r ./build.zip *
+        working-directory: ./extension/build
+      - name: Create GitHub Release
+        id: create_release
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        with:
+          tag_name:
+            ${{ github.event.inputs.release }}-beta.${{
+            github.event.inputs.version }}
+          release_name:
+            ${{ github.event.inputs.release }}-beta.${{
+            github.event.inputs.version }}
+          body:
+            ${{ github.event.inputs.release }}-beta.${{
+            github.event.inputs.version }}
+          draft: false
+          prerelease: true
+      - name: Upload Release Asset
+        id: upload-release-asset
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: ./extension/build/build.zip
+          asset_name:
+            build-${{ github.event.inputs.release }}-beta.${{
+            github.event.inputs.version }}.zip
+          asset_content_type: application/zip
+      # - name:
+      - name: Submit extension to Chrome
+        uses: ./.github/actions/chrome-extension-upload
+        with:
+          file-path: ./extension/build/build.zip
+          extension-id: "kcigoalhjaghfigblagmiopnefgenfjb"
+          client-id: ${{ secrets.EXTENSION_CLIENT_ID }}
+          client-secret: ${{ secrets.EXTENSION_CLIENT_SECRET }}
+          refresh-token: ${{ secrets.EXTENSION_REFRESH_TOKEN }}
+          publish: true
+          publish-target: trustedTesters
+      - name: Slack Notification
+        uses: rtCamp/action-slack-notify@e31e87e03dd19038e411e38ae27cbad084a90661 #v2.3.3
+        env:
+          MSG_MINIMAL: true
+          SLACK_CHANNEL: team-wallet-eng
+          SLACK_COLOR: "#391EDA"
+          SLACK_ICON: https://github.com/stellar/freighter/blob/master/docs/static/images/logo.png?size=48
+          SLACK_MESSAGE:
+            "https://github.com/stellar/freighter/releases/tag/${{
+            github.event.inputs.release }}-beta.${{ github.event.inputs.version
+            }}"
+          SLACK_TITLE:
+            Freighter v${{ github.event.inputs.release }}-beta.${{
+            github.event.inputs.version }} has been submitted for testing!
+          SLACK_USERNAME: Freighter Administrative Assistant
+          SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK }}

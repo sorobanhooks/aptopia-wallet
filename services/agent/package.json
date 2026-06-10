@@ -8,17 +8,24 @@
     "dev": "nodemon --exec ts-node src/index.ts",
     "build": "tsc -p tsconfig.json",
     "start": "node dist/index.js",
-    "typecheck": "tsc --noEmit -p tsconfig.json"
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "npm run test:node && npm run test:jest",
+    "test:node": "node --import tsx --test __tests__/auth.test.ts __tests__/narrate-log-guardrail.test.ts __tests__/pending-tier2-routes.test.ts",
+    "test:jest": "jest __tests__/agent-secret-crypto.test.ts"
   },
   "dependencies": {
+    "@types/cors": "^2.8.19",
+    "@types/jsonwebtoken": "^9.0.10",
     "@x402/core": "^2.9.0",
     "@x402/express": "^2.9.0",
     "@x402/fetch": "^2.9.0",
     "@x402/stellar": "^2.9.0",
     "axios": "^1.15.0",
+    "cors": "^2.8.6",
     "dotenv": "^16.4.5",
     "express": "^4.21.2",
     "ioredis": "^5.10.1",
+    "jsonwebtoken": "^9.0.3",
     "mongoose": "^9.4.1",
     "nodemon": "^3.1.14",
     "stellar-sdk": "^13.3.0",
@@ -28,8 +35,12 @@
     "@types/axios": "^0.9.36",
     "@types/express": "^4.17.21",
     "@types/ioredis": "^4.28.10",
+    "@types/jest": "^30.0.0",
     "@types/node": "^22.10.2",
+    "jest": "^30.4.2",
+    "ts-jest": "^29.4.11",
     "ts-node-dev": "^2.0.0",
+    "tsx": "^4.22.3",
     "typescript": "^5.7.2"
   }
 }
