@@ -24,13 +24,13 @@ const _AMPLITUDE_EXPERIMENT_DEPLOYMENT_KEY =
 
 export const METRICS_PLATFORM = "WEB";
 
-export const BACKEND_URL = process.env.BACKEND_URL || "";
-export const TELEGRAM_BOT =
-  process.env.TELEGRAM_BOT || "https://t.me/aptopia_smart_wallet_bot";
+export const BACKEND_URL =
+  process.env.BACKEND_URL || "https://api.agent.xyra.desiflex.in";
+export const TELEGRAM_BOT = process.env.TELEGRAM_BOT || "";
 export const STELLAR_NETWORK = process.env.STELLAR_NETWORK || "testnet";
 export const API_KEY = process.env.API_KEY || "";
 export const BAKU_API_URL =
-  process.env.BAKU_API_URL || "http://localhost:8787";
+  process.env.BAKU_API_URL || "https://api.vault.xyra.desiflex.in";
 
 export {
   _AMPLITUDE_KEY as AMPLITUDE_KEY,
