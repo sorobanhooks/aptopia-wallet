@@ -80,3 +80,23 @@ export function validatePaidConfig(): boolean {
 
   return true;
 }
+
+/**
+ * Gemini config shared by the AI services (copilot swap-intent parse, rule/log
+ * narration, contract summary). Centralised here so the model id can't drift
+ * across services.
+ *
+ * - `geminiApiKey` is `undefined` when GEMINI_API_KEY is unset OR still a
+ *   `replace-with-*` placeholder, so callers fall back to their deterministic
+ *   output instead of firing a request that 401/403s.
+ * - `geminiModel` defaults to a current, valid flash model. The previous
+ *   hard-coded default `gemini-3.5-flash` is NOT a real Gemini model id — every
+ *   call 404'd, surfacing as "Copilot is unavailable right now." Override with
+ *   the GEMINI_MODEL env var / deploy secret.
+ */
+export const geminiApiKey: string | undefined = isPlaceholder(
+  process.env.GEMINI_API_KEY,
+)
+  ? undefined
+  : process.env.GEMINI_API_KEY;
+export const geminiModel = process.env.GEMINI_MODEL || "gemini-2.5-flash";

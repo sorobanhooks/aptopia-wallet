@@ -2,7 +2,7 @@
 // Account header. Includes both wallet balances and Yield Hub vault positions.
 //
 // Price source (reused, not new):
-//   getTokenPrices(["XLM"]) from @shared/api/internal — the same Stellar
+//   getTokenPrices(["native"]) from @shared/api/internal — the same Stellar
 //   Wallet SDK path used by the mainnet token list. USDC is pegged at $1.
 //
 // Refresh: 60-second interval + window-focus event.
@@ -144,7 +144,10 @@ export const usePortfolioTotal = ({
 
     try {
       // Reuse the existing wallet SDK price path (same as the mainnet token list).
-      const prices = await getTokenPrices(["XLM"]);
+      // XLM's canonical asset id is "native"; passing "XLM" makes
+      // getAssetFromCanonical throw "invalid asset canonical id: XLM", which
+      // fails the fetch before it starts (and can crash the account view).
+      const prices = await getTokenPrices(["native"]);
       const xlmPrice = extractXlmPrice(prices);
 
       if (!xlmPrice) {

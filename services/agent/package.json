@@ -10,7 +10,7 @@
     "start": "node dist/index.js",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "npm run test:node && npm run test:jest",
-    "test:node": "node --import tsx --test __tests__/auth.test.ts __tests__/narrate-log-guardrail.test.ts __tests__/pending-tier2-routes.test.ts",
+    "test:node": "node --import tsx --test __tests__/auth.test.ts __tests__/narrate-log-guardrail.test.ts __tests__/pending-tier2-routes.test.ts __tests__/agent-metrics.test.ts __tests__/account-errors.test.ts __tests__/copilot-parse.test.ts __tests__/strategy-engine.test.ts __tests__/strategy-mapping.test.ts __tests__/trade-routing.test.ts __tests__/strategies-routes.test.ts __tests__/telegram-menu.test.ts",
     "test:jest": "jest __tests__/agent-secret-crypto.test.ts"
   },
   "dependencies": {

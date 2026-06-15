@@ -5,6 +5,7 @@ export enum TabsList {
   COLLECTIBLES = "collectibles",
   YIELD_HUB = "yield_hub",
   AGENT_DASHBOARD = "agent_dashboard",
+  AI_COPILOT = "ai_copilot",
 }
 
 interface AccountTabsContextType {

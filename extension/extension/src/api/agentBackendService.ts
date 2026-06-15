@@ -16,6 +16,27 @@ import {
   OffChainYieldSource,
 } from "./types";
 
+export type CopilotParseResult =
+  | {
+      type: "swap";
+      venue: "soroswap";
+      amountIn: string; // human units as typed by the user, e.g. "5" — NOT base units (convert before buildSwap)
+      tokenIn: "XLM" | "USDC";
+      tokenOut: "XLM" | "USDC";
+      slippageBps?: number;
+    }
+  | { type: "clarification"; message: string }
+  | { type: "unsupported"; message: string };
+
+/** Error thrown by agent-backend calls, carrying the HTTP status so views can
+ *  distinguish 404 (no agent for this wallet) from transient/auth failures. */
+export class AgentHttpError extends Error {
+  constructor(public status: number, message: string) {
+    super(message);
+    this.name = "AgentHttpError";
+  }
+}
+
 interface CachedToken {
   token: string;
   /** epoch ms when the JWT expires */
@@ -162,13 +183,12 @@ class AgentBackendService {
     const isJson = contentType.includes("application/json");
 
     if (!res.ok) {
+      let message = res.statusText;
       if (isJson) {
         const errorData = await res.json().catch(() => null);
-        if (errorData?.error) {
-          throw new Error(errorData.error);
-        }
+        if (errorData?.error) message = errorData.error;
       }
-      throw new Error(res.statusText);
+      throw new AgentHttpError(res.status, message);
     }
 
     if (!isJson) {
@@ -304,6 +324,22 @@ class AgentBackendService {
     const url = `${this.baseUrl}/explain-rules/${address}`;
     return this.authedFetch<ExplainRulesResponse>(url, {
       method: "POST",
+    });
+  }
+
+  /**
+   * Sends a natural-language message to the agent backend's copilot parser
+   * and returns a structured swap intent (or clarification/unsupported).
+   * POST /v1/copilot/parse
+   */
+  async parseCopilot(
+    message: string,
+    context: { role: "user" | "copilot"; text: string }[] = [],
+  ): Promise<CopilotParseResult> {
+    return this.authedFetch<CopilotParseResult>(`${this.baseUrl}/copilot/parse`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ message, context }),
     });
   }
 

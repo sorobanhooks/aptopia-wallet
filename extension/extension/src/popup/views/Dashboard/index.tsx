@@ -26,28 +26,49 @@ import {
 } from "helpers/stellar";
 import { agentBackendService } from "api/agentBackendService";
 import { AgentMetrics, AgentLog } from "api/types";
+import { AgentActivation } from "popup/components/account/AgentActivation";
+import { selectAgentViewState, AgentViewState } from "./selectAgentViewState";
 import { TELEGRAM_BOT } from "constants/env";
 import { useDispatch } from "react-redux";
+import { useActiveTab } from "popup/components/account/AccountTabs/hooks/useActiveTab";
+import { TabsList } from "popup/views/Account/contexts/activeTabContext";
 
 import "./styles.scss";
 
-enum AgentFetchStatus {
-  LOADING = "LOADING",
-  UNCONNECTED = "UNCONNECTED",
-  CONNECTED = "CONNECTED",
+export interface DashboardProps {
+  /**
+   * `page` (default): standalone route — wraps content in `View.Content` and
+   * "Back" navigates to the Account route.
+   * `tab`: embedded as the Agents pane inside the Account view's tab slider —
+   * skips the `View.Content` wrapper (Account already provides it) and "Back"
+   * returns to the Tokens tab instead of navigating.
+   */
+  mode?: "page" | "tab";
 }
 
-export const Dashboard = () => {
+export const Dashboard = ({ mode = "page" }: DashboardProps = {}) => {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const dispatch = useDispatch();
   const publicKey = useSelector(publicKeySelector);
   const networkDetails = useSelector(settingsNetworkDetailsSelector);
-  const [status, setStatus] = useState<AgentFetchStatus>(
-    AgentFetchStatus.LOADING,
-  );
+  const { setActiveTab } = useActiveTab();
+  const isTabMode = mode === "tab";
+
+  // In tab mode the tab strip is the primary nav, so "Back" drops to the
+  // Tokens tab; as a standalone page it returns to the Account route.
+  const goBack = () =>
+    isTabMode
+      ? setActiveTab(TabsList.TOKENS)
+      : navigateTo(ROUTES.account, navigate);
+
+  // Account already wraps the tab slider in View.Content — avoid double-wrapping.
+  const Wrapper = ({ children }: { children: React.ReactNode }) =>
+    isTabMode ? <>{children}</> : <View.Content>{children}</View.Content>;
+  const [isLoading, setIsLoading] = useState(true);
   const [metrics, setMetrics] = useState<AgentMetrics | null>(null);
   const [recentLogs, setRecentLogs] = useState<AgentLog[]>([]);
+  const [fetchError, setFetchError] = useState<unknown>(null);
 
   const getAgentDetails = useCallback(async () => {
     if (!publicKey) return;
@@ -55,7 +76,7 @@ export const Dashboard = () => {
     // Authenticate /v1/* calls as the active wallet (SIWE-style).
     agentBackendService.setSigningKey(publicKey);
 
-    setStatus(AgentFetchStatus.LOADING);
+    setIsLoading(true);
     try {
       const metricsData = await agentBackendService.getMetrics(publicKey);
       const agentAddress = metricsData.agentAddress;
@@ -63,14 +84,26 @@ export const Dashboard = () => {
       // Store globally for other pages to reuse
       dispatch(setAgentAddress(agentAddress));
 
-      const logsData = await agentBackendService.getLogs(agentAddress, 1, 5);
-
+      // Metrics succeeded — commit the result and clear any prior error
+      // regardless of whether the logs fetch below succeeds.
       setMetrics(metricsData);
-      setRecentLogs(logsData.items);
-      setStatus(AgentFetchStatus.CONNECTED);
+      setFetchError(null);
+
+      // Logs are non-critical: a transient failure here must not null-out
+      // metrics or flip the view to SERVICE_ERROR.
+      try {
+        const logsData = await agentBackendService.getLogs(agentAddress, 1, 5);
+        setRecentLogs(logsData.items);
+      } catch (logsErr) {
+        console.warn("Failed to fetch agent logs (non-critical):", logsErr);
+        setRecentLogs([]);
+      }
     } catch (e) {
       console.error("Failed to fetch agent details:", e);
-      setStatus(AgentFetchStatus.UNCONNECTED);
+      setMetrics(null);
+      setFetchError(e);
+    } finally {
+      setIsLoading(false);
     }
   }, [publicKey, dispatch]);
 
@@ -87,22 +120,24 @@ export const Dashboard = () => {
     return () => window.removeEventListener("focus", handleFocus);
   }, [getAgentDetails]);
 
-  if (status === AgentFetchStatus.LOADING) {
+  if (isLoading) {
     return (
-      <View.Content>
+      <Wrapper>
         <div className="Dashboard__loading">
           <Loader />
           <Text as="p" size="sm" color="gray-500">
             {t("Fetching agent details...")}
           </Text>
         </div>
-      </View.Content>
+      </Wrapper>
     );
   }
 
-  if (status === AgentFetchStatus.UNCONNECTED) {
+  const viewState = selectAgentViewState({ metrics, error: fetchError });
+
+  if (viewState === AgentViewState.NO_AGENT) {
     return (
-      <View.Content>
+      <Wrapper>
         <div className="Dashboard__unconnected">
           <div className="Dashboard__unconnected__icon">
             <Icon.Globe02 />
@@ -117,7 +152,6 @@ export const Dashboard = () => {
           <Text
             as="p"
             size="sm"
-            color="gray-500"
             addlClassName="Dashboard__unconnected__desc"
           >
             {t(
@@ -129,7 +163,7 @@ export const Dashboard = () => {
               size="md"
               variant="secondary"
               isFullWidth
-              onClick={() => navigateTo(ROUTES.account, navigate)}
+              onClick={goBack}
               icon={<Icon.ArrowLeft />}
               iconPosition="left"
             >
@@ -148,20 +182,71 @@ export const Dashboard = () => {
             </Button>
           </div>
         </div>
-      </View.Content>
+      </Wrapper>
+    );
+  }
+
+  if (viewState === AgentViewState.SERVICE_ERROR) {
+    return (
+      <Wrapper>
+        <div className="Dashboard__unconnected">
+          <div className="Dashboard__unconnected__icon">
+            <Icon.AlertCircle />
+          </div>
+          <Heading
+            as="h1"
+            size="xs"
+            addlClassName="Dashboard__unconnected__title"
+          >
+            {t("Couldn't reach the agent service")}
+          </Heading>
+          <div className="Dashboard__unconnected__actions">
+            <Button
+              size="md"
+              variant="secondary"
+              isFullWidth
+              onClick={goBack}
+              icon={<Icon.ArrowLeft />}
+              iconPosition="left"
+            >
+              {t("Back")}
+            </Button>
+            <Button
+              size="md"
+              variant="primary"
+              isFullWidth
+              onClick={getAgentDetails}
+            >
+              {t("Retry")}
+            </Button>
+          </div>
+        </div>
+      </Wrapper>
+    );
+  }
+
+  if (viewState === AgentViewState.NEEDS_ACTIVATION && metrics) {
+    return (
+      <Wrapper>
+        <AgentActivation
+          agentAddress={metrics.agentAddress}
+          funded={!!metrics.funded}
+          usdcTrustlineReady={!!metrics.usdcTrustlineReady}
+          onRefresh={getAgentDetails}
+          onOpenTelegram={() => openTab(`${TELEGRAM_BOT}?start=${publicKey}`)}
+          onManageRules={() => navigateTo(ROUTES.agentConfig, navigate)}
+        />
+      </Wrapper>
     );
   }
 
   return (
     <React.Fragment>
-      <View.Content>
+      <Wrapper>
         <div className="Dashboard">
           <header className="Dashboard__header">
             <div className="Dashboard__header__left">
-              <div
-                className="Dashboard__header__back-btn"
-                onClick={() => navigateTo(ROUTES.account, navigate)}
-              >
+              <div className="Dashboard__header__back-btn" onClick={goBack}>
                 <Icon.ArrowLeft />
               </div>
               <Heading
@@ -352,7 +437,7 @@ export const Dashboard = () => {
             </div>
           </section>
         </div>
-      </View.Content>
+      </Wrapper>
     </React.Fragment>
   );
 };

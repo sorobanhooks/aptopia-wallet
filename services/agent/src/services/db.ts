@@ -1,4 +1,16 @@
 import mongoose, { Schema, Document, Types } from 'mongoose';
+import { StrategyType, StrategyRole } from './strategy-types';
+
+export interface IStrategy {
+  _id?: Types.ObjectId;
+  type: StrategyType;
+  role: StrategyRole;
+  enabled: boolean;
+  /** Type-specific numeric params (see STRATEGY_DEFAULTS). */
+  params: Record<string, number>;
+  lastRunAt: Date | null;
+  createdAt?: Date;
+}
 
 export interface IAgent extends Document {
   telegramId: string;
@@ -27,6 +39,8 @@ export interface IAgent extends Document {
   active: boolean;
   /** Lifetime count of successful trades (Tier 1 and confirmed Tier 2). */
   totalSuccessfulTrades: number;
+  /** Role-based strategy stack. Empty for legacy agents until migrated. */
+  strategies: Types.DocumentArray<IStrategy & Document>;
   /** Throttles repeated low-USDC Telegram alerts */
   lastLowBalanceAlertAt?: Date;
   /**
@@ -44,6 +58,17 @@ export interface IAgent extends Document {
     text: string;
   };
 }
+
+const StrategySubSchema = new Schema<IStrategy>(
+  {
+    type: { type: String, required: true, enum: ['dca', 'dip_buy', 'take_profit', 'stop_loss'] },
+    role: { type: String, required: true, enum: ['accumulate', 'sell', 'protect'] },
+    enabled: { type: Boolean, default: true },
+    params: { type: Schema.Types.Mixed, default: {} },
+    lastRunAt: { type: Date, default: null },
+  },
+  { timestamps: { createdAt: true, updatedAt: false } }
+);
 
 const AgentSchema: Schema = new Schema({
   telegramId: { type: String, required: true },
@@ -67,6 +92,7 @@ const AgentSchema: Schema = new Schema({
   lastReset: { type: Date, default: Date.now },
   active: { type: Boolean, default: true },
   totalSuccessfulTrades: { type: Number, default: 0 },
+  strategies: { type: [StrategySubSchema], default: [] },
   lastLowBalanceAlertAt: { type: Date, required: false },
   usdcTrustlineReady: { type: Boolean, required: false },
   rulesExplanation: {
@@ -180,7 +206,12 @@ export const connectDB = async (uri: string) => {
     await Agent.syncIndexes();
     await AgentLog.syncIndexes();
     await ContractSummary.syncIndexes();
-    console.log('MongoDB Connected to Atlas');
+    // Report the connected host (no credentials) so deploy/pm2 logs confirm
+    // which database is actually in use — the provider can change via the
+    // MONGODB_URI env without touching code.
+    const host = mongoose.connection.host || 'unknown';
+    const dbName = mongoose.connection.name || 'unknown';
+    console.log(`MongoDB connected (host=${host} db=${dbName})`);
   } catch (error) {
     console.error('MongoDB connection error:', error);
     process.exit(1);

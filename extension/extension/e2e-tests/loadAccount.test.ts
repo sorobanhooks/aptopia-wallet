@@ -127,85 +127,32 @@ test("Switches network and fetches correct balances while clearing cache", async
   extensionId,
   context,
 }) => {
+  // Balances are fetched directly from Horizon via Horizon.Server.loadAccount
+  // (GET {networkUrl}/accounts/{pubkey}), not the legacy /account-balances/
+  // proxy. Stub the Horizon /accounts/ endpoint per network (testnet uses the
+  // horizon-testnet host, mainnet the horizon.stellar.org host).
+  const horizonAccount = (nativeBalance: string) => ({
+    id: "GDMDFPJPFH4Z2LLUCNNQT3HVQ2XU2TMZBA6OL37C752WCKU7JZO2S52R",
+    account_id: "GDMDFPJPFH4Z2LLUCNNQT3HVQ2XU2TMZBA6OL37C752WCKU7JZO2S52R",
+    sequence: "1234567890",
+    subentry_count: 0,
+    last_modified_ledger: 12345,
+    balances: [{ balance: nativeBalance, asset_type: "native" }],
+    signers: [
+      {
+        weight: 1,
+        key: "GDMDFPJPFH4Z2LLUCNNQT3HVQ2XU2TMZBA6OL37C752WCKU7JZO2S52R",
+        type: "ed25519_public_key",
+      },
+    ],
+    data: {},
+    thresholds: { low_threshold: 0, med_threshold: 0, high_threshold: 0 },
+  });
+
   const stubOverrides = async () => {
-    await page.route("**/account-balances/**", async (route) => {
-      let json = {};
-
-      if (route.request().url().includes("TESTNET")) {
-        json = {
-          balances: {
-            native: {
-              token: {
-                type: "native",
-                code: "XLM",
-              },
-              total: "2",
-              available: "2",
-              sellingLiabilities: "0",
-              buyingLiabilities: "0",
-              minimumBalance: "1",
-              blockaidData: {
-                result_type: "Benign",
-                malicious_score: "0.0",
-                attack_types: {},
-                chain: "stellar",
-                address: "",
-                metadata: {
-                  type: "",
-                },
-                fees: {},
-                features: [],
-                trading_limits: {},
-                financial_stats: {},
-              },
-            },
-          },
-          isFunded: true,
-          subentryCount: 0,
-          error: {
-            horizon: null,
-            soroban: null,
-          },
-        };
-      } else {
-        json = {
-          balances: {
-            native: {
-              token: {
-                type: "native",
-                code: "XLM",
-              },
-              total: "1",
-              available: "1",
-              sellingLiabilities: "0",
-              buyingLiabilities: "0",
-              minimumBalance: "1",
-              blockaidData: {
-                result_type: "Benign",
-                malicious_score: "0.0",
-                attack_types: {},
-                chain: "stellar",
-                address: "",
-                metadata: {
-                  type: "",
-                },
-                fees: {},
-                features: [],
-                trading_limits: {},
-                financial_stats: {},
-              },
-            },
-          },
-          isFunded: true,
-          subentryCount: 0,
-          error: {
-            horizon: null,
-            soroban: null,
-          },
-        };
-      }
-
-      await route.fulfill({ json });
+    await page.route("**/accounts/**", async (route) => {
+      const isTestnet = route.request().url().includes("horizon-testnet");
+      await route.fulfill({ json: horizonAccount(isTestnet ? "2" : "1") });
     });
   };
 
@@ -219,44 +166,8 @@ test("Switches network and fetches correct balances while clearing cache", async
   await expect(page.getByTestId("asset-amount")).toHaveText("1");
 
   // now go back to Testnet and make sure we do a fresh balance fetch
-  await page.route("**/account-balances/**", async (route) => {
-    const json = {
-      balances: {
-        native: {
-          token: {
-            type: "native",
-            code: "XLM",
-          },
-          total: "999111",
-          available: "99911",
-          sellingLiabilities: "0",
-          buyingLiabilities: "0",
-          minimumBalance: "1",
-          blockaidData: {
-            result_type: "Benign",
-            malicious_score: "0.0",
-            attack_types: {},
-            chain: "stellar",
-            address: "",
-            metadata: {
-              type: "",
-            },
-            fees: {},
-            features: [],
-            trading_limits: {},
-            financial_stats: {},
-          },
-        },
-      },
-      isFunded: true,
-      subentryCount: 0,
-      error: {
-        horizon: null,
-        soroban: null,
-      },
-    };
-
-    await route.fulfill({ json });
+  await page.route("**/accounts/**", async (route) => {
+    await route.fulfill({ json: horizonAccount("999111") });
   });
   await page.getByTestId("network-selector-open").click();
   await page.getByText("Test Net").click();

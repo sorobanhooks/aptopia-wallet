@@ -64,7 +64,8 @@ export const signBlob = async ({
       blob.networkPassphrase === "Public Global Stellar Network ; October 2015";
     wallet.setNetworkConfig({
       network: isMainnet ? "mainnet" : "testnet",
-      apiKey: (wallet as any).config?.apiKey || "qomjjag2a9gq95uhlnzhl",
+      apiKey:
+        (wallet as any).config?.apiKey || process.env.API_KEY || "unconfigured",
     } as any);
 
     if (activePublicKey) {

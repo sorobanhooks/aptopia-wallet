@@ -8,6 +8,7 @@ import { revokeAgentWallet } from '../services/revoke-agent';
 import { bot } from '../services/bot';
 import { createChallenge, verifyAndIssue } from '../services/auth';
 import { requireAuth, assertOwnsAgent } from '../middleware/require-auth';
+import { parseSwapMessage } from '../services/copilot-parse-ai';
 import { decryptAgentSecret } from '../services/agent-secret-crypto';
 import { getPendingTier2Trade, clearPendingTier2Trade } from '../services/pending-tier2';
 import { recordSuccessfulBuy, recordSuccessfulSell } from '../services/agent-stats';
@@ -15,6 +16,11 @@ import { narrateLogWithGemini } from '../services/narrate-log-ai';
 import { explainRulesWithGemini, type AgentRuleFields } from '../services/explain-rules-ai';
 import { createHash } from 'crypto';
 import { OFF_CHAIN_YIELD_SOURCES } from '../services/off-chain-yield-sources';
+import { buildAgentMetricsBody } from '../services/agent-metrics';
+import { validateNewStrategy, validateParamPatch } from './strategy-validation';
+import { wouldViolateSingleAccumulate } from '../services/strategy-engine';
+import type { StrategyConfig, StrategyType } from '../services/strategy-types';
+import { strategiesToFlatRules, applyFlatRulesToStrategies } from '../services/strategy-mapping';
 
 const ALLOWED_RULE_KEYS = [
   'buyBelowUsd',
@@ -52,6 +58,19 @@ function publicRules(agent: {
 
 function validateTierOrder(tier1: number, tier2: number): boolean {
   return tier1 > 0 && tier2 > tier1;
+}
+
+function readStrategies(agent: any): StrategyConfig[] {
+  const raw = Array.isArray(agent.strategies) ? agent.strategies : [];
+  return raw.map((s: any) => ({
+    id: String(s._id), type: s.type, role: s.role, enabled: !!s.enabled,
+    params: (s.params ?? {}) as Record<string, number>,
+    lastRunAt: s.lastRunAt ? new Date(s.lastRunAt) : null,
+  }));
+}
+
+function publicStrategy(s: any) {
+  return { id: String(s._id), type: s.type, role: s.role, enabled: !!s.enabled, params: s.params ?? {}, lastRunAt: s.lastRunAt ?? null };
 }
 
 export function createV1Router(): Router {
@@ -160,11 +179,15 @@ export function createV1Router(): Router {
 
   router.get('/rules/:address', async (req: Request, res: Response) => {
     const agent = await Agent.findOne({ agentAddress: req.params.address }).lean();
-    if (!agent) {
-      return res.status(404).json({ error: 'Agent not found' });
-    }
+    if (!agent) return res.status(404).json({ error: 'Agent not found' });
     if (!assertOwnsAgent(req, res, (agent as any).targetWallet)) return;
-    return res.json(publicRules(agent as any));
+
+    const strategies = readStrategies(agent);
+    const flat = strategies.length > 0
+      ? strategiesToFlatRules(strategies)
+      : { buyBelowUsd: (agent as any).buyBelowUsd, sellAboveUsd: (agent as any).sellAboveUsd, buyAmountUsdc: (agent as any).buyAmountUsdc, sellAmountXlm: (agent as any).sellAmountXlm };
+
+    return res.json({ agentAddress: (agent as any).agentAddress, tier1Max: (agent as any).tier1Max, tier2Max: (agent as any).tier2Max, dailyBudget: (agent as any).dailyBudget, ...flat });
   });
 
   router.put('/rules/:address', async (req: Request, res: Response) => {
@@ -230,17 +253,94 @@ export function createV1Router(): Router {
       return res.status(400).json({ error: 'sellAmountXlm must be greater than 0' });
     }
 
-    const updated = await Agent.findOneAndUpdate(
-      { agentAddress: req.params.address },
-      { $set: updates, $unset: { rulesExplanation: '' } },
-      { new: true }
-    );
-
-    if (updated?.active && updated.usdcTrustlineReady !== false) {
-      WorkerManager.startAgentWorker(updated);
+    // Split the validated `updates` into agent-level (tier/budget) vs strategy-level (price rules).
+    const agentLevel: Record<string, number> = {};
+    for (const k of ['tier1Max', 'tier2Max', 'dailyBudget'] as const) {
+      if (updates[k] !== undefined) agentLevel[k] = updates[k]!;
+    }
+    const flatBody: Record<string, number> = {};
+    for (const k of ['buyBelowUsd', 'sellAboveUsd', 'buyAmountUsdc', 'sellAmountXlm'] as const) {
+      if (updates[k] !== undefined) flatBody[k] = updates[k]!;
     }
 
-    return res.json(publicRules(updated!));
+    if (Object.keys(agentLevel).length > 0) agent.set(agentLevel);
+    if (Object.keys(flatBody).length > 0) {
+      const nextStrategies = applyFlatRulesToStrategies(readStrategies(agent), flatBody);
+      (agent as any).strategies = nextStrategies as any;
+    }
+    await agent.save();
+
+    if (agent.active && agent.usdcTrustlineReady !== false) {
+      WorkerManager.startAgentWorker(agent);
+    }
+
+    const flat = strategiesToFlatRules(readStrategies(agent));
+    return res.json({ agentAddress: agent.agentAddress, tier1Max: agent.tier1Max, tier2Max: agent.tier2Max, dailyBudget: agent.dailyBudget, ...flat });
+  });
+
+  // GET /v1/strategies/:address — list strategies for the agent
+  router.get('/strategies/:address', async (req: Request, res: Response) => {
+    const agent = await Agent.findOne({ agentAddress: req.params.address }).lean();
+    if (!agent) return res.status(404).json({ error: 'Agent not found' });
+    if (!assertOwnsAgent(req, res, (agent as any).targetWallet)) return;
+    return res.json((agent as any).strategies?.map(publicStrategy) ?? []);
+  });
+
+  // POST /v1/strategies/:address — add a strategy
+  router.post('/strategies/:address', async (req: Request, res: Response) => {
+    const agent = await Agent.findOne({ agentAddress: req.params.address });
+    if (!agent) return res.status(404).json({ error: 'Agent not found' });
+    if (!assertOwnsAgent(req, res, agent.targetWallet)) return;
+
+    const result = validateNewStrategy(req.body ?? {}, readStrategies(agent));
+    if (!result.ok) return res.status(400).json({ error: result.error });
+
+    (agent as any).strategies.push(result.value);
+    await agent.save();
+    if (agent.active && agent.usdcTrustlineReady !== false) WorkerManager.startAgentWorker(agent);
+    const created = (agent as any).strategies[(agent as any).strategies.length - 1];
+    return res.status(201).json(publicStrategy(created));
+  });
+
+  // PUT /v1/strategies/:address/:strategyId — update params / toggle enabled
+  router.put('/strategies/:address/:strategyId', async (req: Request, res: Response) => {
+    const agent = await Agent.findOne({ agentAddress: req.params.address });
+    if (!agent) return res.status(404).json({ error: 'Agent not found' });
+    if (!assertOwnsAgent(req, res, agent.targetWallet)) return;
+
+    const sub = (agent as any).strategies.id(req.params.strategyId);
+    if (!sub) return res.status(404).json({ error: 'Strategy not found' });
+
+    const willEnable = req.body?.enabled !== undefined ? !!req.body.enabled : sub.enabled;
+    if (willEnable && sub.role === 'accumulate') {
+      const others = readStrategies(agent).filter((s) => s.id !== String(sub._id));
+      if (wouldViolateSingleAccumulate(others, { role: 'accumulate', enabled: true })) {
+        return res.status(400).json({ error: 'Only one enabled accumulate strategy is allowed; pause the other first' });
+      }
+    }
+    if (req.body?.enabled !== undefined) sub.enabled = !!req.body.enabled;
+    if (req.body?.params && typeof req.body.params === 'object') {
+      const patch = validateParamPatch(sub.type as StrategyType, req.body.params as Record<string, unknown>);
+      if (!patch.ok) return res.status(400).json({ error: patch.error });
+      for (const [k, n] of Object.entries(patch.value!)) sub.params[k] = n;
+      sub.markModified('params');
+    }
+    await agent.save();
+    if (agent.active && agent.usdcTrustlineReady !== false) WorkerManager.startAgentWorker(agent);
+    return res.json(publicStrategy(sub));
+  });
+
+  // DELETE /v1/strategies/:address/:strategyId
+  router.delete('/strategies/:address/:strategyId', async (req: Request, res: Response) => {
+    const agent = await Agent.findOne({ agentAddress: req.params.address });
+    if (!agent) return res.status(404).json({ error: 'Agent not found' });
+    if (!assertOwnsAgent(req, res, agent.targetWallet)) return;
+    const sub = (agent as any).strategies.id(req.params.strategyId);
+    if (!sub) return res.status(404).json({ error: 'Strategy not found' });
+    sub.deleteOne();
+    await agent.save();
+    if (agent.active && agent.usdcTrustlineReady !== false) WorkerManager.startAgentWorker(agent);
+    return res.json({ ok: true });
   });
 
   router.get('/metrics/:address', async (req: Request, res: Response) => {
@@ -260,19 +360,7 @@ export function createV1Router(): Router {
     const pendingEntry = getPendingTier2Trade(agentId);
     const pendingTier2Count = pendingEntry ? 1 : 0;
 
-    return res.json({
-      agentAddress: agent.agentAddress,
-      balances: {
-        native: balances.native,
-        usdc: balances.usdc,
-        assets: balances.assets ?? {},
-      },
-      dailySpentUsd: agent.spentToday,
-      dailyLimitUsd: agent.dailyBudget,
-      totalSuccessfulTrades: agent.totalSuccessfulTrades ?? 0,
-      status: agent.active ? 'healthy' : 'disabled',
-      pendingTier2Count,
-    });
+    return res.json(buildAgentMetricsBody(agent, balances, pendingTier2Count));
   });
 
   // --- Tier-2 wallet confirmation endpoints ---
@@ -578,6 +666,29 @@ export function createV1Router(): Router {
     );
 
     return res.json({ explanation, cached: false });
+  });
+
+  // POST /v1/copilot/parse
+  // Protected: requireAuth (applied at router level).
+  // Parses a natural-language message into a structured swap intent via Gemini (guardrailed).
+  router.post('/copilot/parse', async (req: Request, res: Response) => {
+    const body = req.body ?? {};
+    const message = typeof body.message === 'string' ? body.message.trim() : '';
+    if (!message) {
+      return res.status(400).json({ error: 'body must include { message }' });
+    }
+    if (message.length > 500) {
+      return res.status(400).json({ error: 'message too long (max 500 characters)' });
+    }
+    const context = Array.isArray(body.context)
+      ? body.context
+          .filter((t: unknown): t is { role: string; text: string } =>
+            !!t && typeof (t as any).text === 'string' && typeof (t as any).role === 'string')
+          .slice(-4)
+          .map((t: { role: string; text: string }) => ({ role: t.role, text: t.text.slice(0, 200) }))
+      : [];
+    const result = await parseSwapMessage(message, context);
+    return res.json(result);
   });
 
   router.post('/revoke/:address', async (req: Request, res: Response) => {

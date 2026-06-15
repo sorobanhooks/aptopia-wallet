@@ -12,7 +12,23 @@ import {
   Balances,
   TradeDirection,
   AssetTransferResult,
+  AssetSkipResult,
 } from './types';
+
+/** Extract a readable reason from a Horizon submit error (op_no_trust, etc.). */
+function stellarSubmitErrorReason(err: unknown): string {
+  const e = err as {
+    response?: { data?: { extras?: { result_codes?: { transaction?: string; operations?: string[] } } } };
+    message?: string;
+  };
+  const rc = e?.response?.data?.extras?.result_codes;
+  if (rc) {
+    const ops = (rc.operations ?? []).filter(Boolean);
+    if (ops.length) return ops.join(', ');
+    if (rc.transaction) return rc.transaction;
+  }
+  return e?.message ?? 'unknown error';
+}
 
 const PATH_SLIPPAGE_BPS = 100; // 1%
 const STELLAR_SCALE = 7;
@@ -265,13 +281,18 @@ export class StellarService implements IChainService {
   async transferAllAssets(
     secret: string,
     destination: string
-  ): Promise<{ transfers: AssetTransferResult[] }> {
+  ): Promise<{ transfers: AssetTransferResult[]; skipped: AssetSkipResult[] }> {
     const pair = Keypair.fromSecret(secret);
     const from = pair.publicKey();
     const initial = await this.server.loadAccount(from);
     const transfers: AssetTransferResult[] = [];
+    const skipped: AssetSkipResult[] = [];
 
-    // Transfer issued assets first.
+    // Transfer issued assets first. A per-asset payment can fail (most commonly
+    // op_no_trust: the destination has no trustline for this asset and can't
+    // receive it). Skip that asset and keep going instead of aborting the whole
+    // revoke — otherwise the user is stuck: can't revoke, can't create a new
+    // agent. The undrainable balance stays in the (now-disabled) agent.
     for (const balance of initial.balances) {
       if (balance.asset_type === 'native' || balance.asset_type === 'liquidity_pool_shares') {
         continue;
@@ -289,40 +310,9 @@ export class StellarService implements IChainService {
         continue;
       }
       const amount = this.floorStellarAmount(amountNum);
-      const asset = new Asset(b.asset_code, b.asset_issuer);
-      const account = await this.server.loadAccount(from);
-      const tx = new TransactionBuilder(account, {
-        fee: BASE_FEE,
-        networkPassphrase: this.networkPassphrase,
-      })
-        .addOperation(
-          Operation.payment({
-            destination,
-            asset,
-            amount,
-          })
-        )
-        .setTimeout(30)
-        .build();
-      tx.sign(pair);
-      const result = await this.server.submitTransaction(tx);
-      transfers.push({
-        token: `${b.asset_code}:${b.asset_issuer}`,
-        amount,
-        txHash: result.hash,
-      });
-    }
-
-    // Then transfer spendable XLM while preserving reserve and fee buffer.
-    const afterAssets = await this.server.loadAccount(from);
-    const nativeBalance = Number(
-      afterAssets.balances.find((b) => b.asset_type === 'native')?.balance ?? '0'
-    );
-    const minReserve = (2 + afterAssets.subentry_count) * BASE_RESERVE_XLM;
-    const spendableXlm = nativeBalance - minReserve - XLM_FEE_BUFFER;
-    if (Number.isFinite(spendableXlm) && spendableXlm > 0) {
-      const amount = this.floorStellarAmount(spendableXlm);
-      if (Number(amount) > 0) {
+      const token = `${b.asset_code}:${b.asset_issuer}`;
+      try {
+        const asset = new Asset(b.asset_code, b.asset_issuer);
         const account = await this.server.loadAccount(from);
         const tx = new TransactionBuilder(account, {
           fee: BASE_FEE,
@@ -331,7 +321,7 @@ export class StellarService implements IChainService {
           .addOperation(
             Operation.payment({
               destination,
-              asset: Asset.native(),
+              asset,
               amount,
             })
           )
@@ -339,14 +329,46 @@ export class StellarService implements IChainService {
           .build();
         tx.sign(pair);
         const result = await this.server.submitTransaction(tx);
-        transfers.push({
-          token: 'XLM',
-          amount,
-          txHash: result.hash,
-        });
+        transfers.push({ token, amount, txHash: result.hash });
+      } catch (err) {
+        skipped.push({ token, amount, reason: stellarSubmitErrorReason(err) });
       }
     }
 
-    return { transfers };
+    // Then transfer spendable XLM while preserving reserve and fee buffer.
+    try {
+      const afterAssets = await this.server.loadAccount(from);
+      const nativeBalance = Number(
+        afterAssets.balances.find((b) => b.asset_type === 'native')?.balance ?? '0'
+      );
+      const minReserve = (2 + afterAssets.subentry_count) * BASE_RESERVE_XLM;
+      const spendableXlm = nativeBalance - minReserve - XLM_FEE_BUFFER;
+      if (Number.isFinite(spendableXlm) && spendableXlm > 0) {
+        const amount = this.floorStellarAmount(spendableXlm);
+        if (Number(amount) > 0) {
+          const account = await this.server.loadAccount(from);
+          const tx = new TransactionBuilder(account, {
+            fee: BASE_FEE,
+            networkPassphrase: this.networkPassphrase,
+          })
+            .addOperation(
+              Operation.payment({
+                destination,
+                asset: Asset.native(),
+                amount,
+              })
+            )
+            .setTimeout(30)
+            .build();
+          tx.sign(pair);
+          const result = await this.server.submitTransaction(tx);
+          transfers.push({ token: 'XLM', amount, txHash: result.hash });
+        }
+      }
+    } catch (err) {
+      skipped.push({ token: 'XLM', amount: '0', reason: stellarSubmitErrorReason(err) });
+    }
+
+    return { transfers, skipped };
   }
 }

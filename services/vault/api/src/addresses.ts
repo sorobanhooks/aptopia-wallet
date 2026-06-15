@@ -161,3 +161,11 @@ export function underlyingSacFor(net: Network, asset: "xlm" | "usdc"): string {
   const a = forNetwork(net);
   return asset === "xlm" ? a.xlmSac : a.usdcSac;
 }
+
+/** Resolve the SAC used on the Soroswap XLM/USDC pool for a symbol.
+ * NOTE: usdc → circleUsdcSac (the token in the live Soroswap pool), NOT the
+ * Blend usdcSac used by the vaults. */
+export function swapTokenSacFor(net: Network, symbol: "xlm" | "usdc"): string {
+  const a = forNetwork(net);
+  return symbol === "xlm" ? a.xlmSac : a.circleUsdcSac;
+}

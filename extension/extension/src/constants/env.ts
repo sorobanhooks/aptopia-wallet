@@ -25,7 +25,8 @@ const _AMPLITUDE_EXPERIMENT_DEPLOYMENT_KEY =
 export const METRICS_PLATFORM = "WEB";
 
 export const BACKEND_URL = process.env.BACKEND_URL || "";
-export const TELEGRAM_BOT = process.env.TELEGRAM_BOT || "";
+export const TELEGRAM_BOT =
+  process.env.TELEGRAM_BOT || "https://t.me/aptopia_smart_wallet_bot";
 export const STELLAR_NETWORK = process.env.STELLAR_NETWORK || "testnet";
 export const API_KEY = process.env.API_KEY || "";
 export const BAKU_API_URL =

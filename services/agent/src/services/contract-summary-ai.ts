@@ -1,4 +1,5 @@
 import type { DecodedContractWasm } from './contract-wasm';
+import { geminiApiKey, geminiModel } from '../config';
 
 export type ContractSummaryPayload = {
   overview: string;
@@ -55,9 +56,9 @@ function fallbackSummary(decoded: DecodedContractWasm): ContractSummaryPayload {
 export async function summarizeContractWasmWithGemini(
   decoded: DecodedContractWasm
 ): Promise<ContractSummaryPayload> {
-  const apiKey = process.env.GEMINI_API_KEY;
+  const apiKey = geminiApiKey;
   if (!apiKey) {
-    console.error('GEMINI_API_KEY is not set');
+    console.error('GEMINI_API_KEY is not set (or placeholder)');
     return fallbackSummary(decoded);
   }
 
@@ -86,7 +87,7 @@ ${JSON.stringify(decoded)}
 `;
 
   try {
-    const model = process.env.GEMINI_MODEL || 'gemini-3.5-flash';
+    const model = geminiModel;
     const response = await fetch(
       `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(apiKey)}`,
       {

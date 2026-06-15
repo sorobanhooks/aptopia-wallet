@@ -15,10 +15,29 @@ import { INDEXER_URL } from "@shared/constants/mercury";
 export const CUSTOM_NETWORK = "STANDALONE";
 export const LP_ISSUER_KEY = "lp";
 
-export const wallet = new StellarWallet({
-  network: (process.env.STELLAR_NETWORK || "testnet") as any,
-  apiKey: process.env.API_KEY || "txh46bg3bhm4qdjwyxknz2",
-});
+/**
+ * The Stellar Wallet SDK routes Horizon rpc, Soroban rpc and the price indexer
+ * through api.sorobanhooks.xyz/.../{apiKey}, and its constructor throws when the
+ * key is empty. Source the key from the environment — `API_KEY`, injected from
+ * the `API_KEY` GitHub secret in CI (and from `.env` locally). If it is missing
+ * we fall back to a non-functional placeholder so the extension still loads;
+ * sorobanhooks-backed features stay disabled until a real key is configured.
+ */
+const createWallet = () => {
+  const network = (process.env.STELLAR_NETWORK || "testnet") as any;
+  try {
+    return new StellarWallet({ network, apiKey: process.env.API_KEY || "" });
+  } catch {
+    // eslint-disable-next-line no-console
+    console.error(
+      "[stellar] API_KEY is not set — sorobanhooks-backed features are disabled. " +
+        "Set API_KEY in .env locally or via the API_KEY GitHub secret in CI.",
+    );
+    return new StellarWallet({ network, apiKey: "unconfigured" });
+  }
+};
+
+export const wallet = createWallet();
 
 export const isPlaywright = process.env.IS_PLAYWRIGHT === "true";
 

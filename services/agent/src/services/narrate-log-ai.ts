@@ -1,4 +1,5 @@
 import type { IAgentLog } from './db';
+import { geminiApiKey, geminiModel } from '../config';
 
 // ---------------------------------------------------------------------------
 // Conservative-refusal guardrail
@@ -65,9 +66,9 @@ export function applyGuardrail(text: string): string | null {
 export async function narrateLogWithGemini(
   log: Pick<IAgentLog, 'amount' | 'status' | 'token' | 'txHash' | 'reason'>,
 ): Promise<string> {
-  const apiKey = process.env.GEMINI_API_KEY;
+  const apiKey = geminiApiKey;
   if (!apiKey) {
-    console.warn('[narrate-log-ai] GEMINI_API_KEY not set — using fallback narration');
+    console.warn('[narrate-log-ai] GEMINI_API_KEY not set (or placeholder) — using fallback narration');
     return buildFallbackNarration(log);
   }
 
@@ -85,7 +86,7 @@ export async function narrateLogWithGemini(
     .join('\n');
 
   try {
-    const model = process.env.GEMINI_MODEL || 'gemini-3.5-flash';
+    const model = geminiModel;
     const response = await fetch(
       `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(apiKey)}`,
       {

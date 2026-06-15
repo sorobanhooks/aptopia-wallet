@@ -62,6 +62,10 @@ export interface AgentMetrics {
   status: "healthy" | "disabled" | string;
   /** Number of Tier-2 trades awaiting user confirmation (0 or 1). */
   pendingTier2Count?: number;
+  /** Account exists past the base reserve (native >= 1 XLM). */
+  funded?: boolean;
+  /** Agent has added its USDC trustline. */
+  usdcTrustlineReady?: boolean;
 }
 
 // --- Tier-2 pending trade (C1a endpoint contract) ---

@@ -18,7 +18,8 @@ export const addCollectible = async ({
     // Configure network for the wallet (needed for Soroban RPC)
     wallet.setNetworkConfig({
       network: network === "public" ? "public" : "testnet",
-      apiKey: (wallet as any).config?.apiKey || "txh46bg3bhm4qdjwyxknz2",
+      apiKey:
+        (wallet as any).config?.apiKey || process.env.API_KEY || "unconfigured",
     } as any);
 
     // Temporarily set the selected public key to bypass WalletNotUnlockedError since we only need read access

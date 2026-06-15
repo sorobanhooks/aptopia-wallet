@@ -22,7 +22,8 @@ export const buildSwapTransaction = async ({
     // Configure the wallet for the current network
     wallet.setNetworkConfig({
       network: networkDetails.network === "public" ? "mainnet" : "testnet",
-      apiKey: (wallet as any).config?.apiKey || "txh46bg3bhm4qdjwyxknz2",
+      apiKey:
+        (wallet as any).config?.apiKey || process.env.API_KEY || "unconfigured",
     } as any);
 
     if (activePublicKey) {

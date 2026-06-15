@@ -143,3 +143,13 @@ export function addrScVal(address: string): xdr.ScVal {
 export function i128ScVal(amount: string | number | bigint): xdr.ScVal {
   return nativeToScVal(BigInt(amount), { type: "i128" });
 }
+
+/** Convert an ordered list of addresses to a Vec<Address> ScVal (e.g. a swap path). */
+export function pathScVal(addresses: string[]): xdr.ScVal {
+  return xdr.ScVal.scvVec(addresses.map((a) => addrScVal(a)));
+}
+
+/** Convert a u64 value (e.g. a deadline timestamp) to ScVal. */
+export function u64ScVal(value: string | number | bigint): xdr.ScVal {
+  return nativeToScVal(BigInt(value), { type: "u64" });
+}

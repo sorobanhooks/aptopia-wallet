@@ -19,8 +19,9 @@ import { isMainnet } from "helpers/stellar";
 import { AccountAssets } from "popup/components/account/AccountAssets";
 import { AccountCollectibles } from "popup/components/account/AccountCollectibles";
 import { AccountHeader } from "popup/components/account/AccountHeader";
-import { AgentDashboard } from "popup/components/account/AgentDashboard";
+import { Dashboard } from "popup/views/Dashboard";
 import { YieldHub } from "popup/views/YieldHub";
+import { AICopilot } from "popup/views/AICopilot";
 import { useHiddenCollectibles } from "popup/components/account/hooks/useHiddenCollectibles";
 import { NotFundedMessage } from "popup/components/account/NotFundedMessage";
 import { formatAmount, roundUsdValue } from "popup/helpers/formatters";
@@ -29,6 +30,7 @@ import { newTabHref } from "helpers/urls";
 import { getTotalUsd } from "popup/helpers/balance";
 import { NetworkDetails } from "@shared/constants/stellar";
 import { reRouteOnboarding } from "popup/helpers/route";
+import { onBalancesChanged } from "popup/helpers/balanceEvents";
 import { AppDataType } from "helpers/hooks/useGetAppData";
 import { AccountBalances } from "helpers/hooks/useGetBalances";
 import { MultiPaneSlider } from "popup/components/SlidingPaneSwitcher";
@@ -111,6 +113,16 @@ export const Account = () => {
       await fetchData({ useAppDataCache: false });
     };
     getData();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Re-fetch balances when a Yield Hub deposit/withdraw reports a change, so the
+  // Tokens tab updates in place instead of requiring a close/reopen.
+  useEffect(() => {
+    const unsubscribe = onBalancesChanged(() => {
+      fetchData({ useAppDataCache: false, shouldForceBalancesRefresh: true });
+    });
+    return unsubscribe;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -320,7 +332,10 @@ export const Account = () => {
                 <YieldHub mode="tab" />
               </div>,
               <div data-testid="account-agent-dashboard">
-                <AgentDashboard />
+                <Dashboard mode="tab" />
+              </div>,
+              <div data-testid="account-ai-copilot">
+                <AICopilot mode="tab" />
               </div>,
             ]}
           />

@@ -48,6 +48,7 @@ export const TabButtons = ({
     collectibles: t("Collectibles"),
     yield_hub: t("Yield Hub"),
     agent_dashboard: t("Agents"),
+    ai_copilot: t("Copilot"),
   };
 
   const tabIcons: Record<string, React.ReactNode> = {
@@ -55,6 +56,7 @@ export const TabButtons = ({
     collectibles: <Icon.Image01 />,
     yield_hub: <Icon.TrendUp02 />,
     agent_dashboard: <Icon.Stars02 />,
+    ai_copilot: <Icon.Stars01 />,
   };
 
   return (

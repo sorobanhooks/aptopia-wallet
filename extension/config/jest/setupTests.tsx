@@ -65,6 +65,7 @@ Object.defineProperty(global, "matchMedia", {
 
 process.env.INDEXER_URL = "http://localhost:3002/api/v1";
 process.env.INDEXER_V2_URL = "http://localhost:3003/api/v1";
+process.env.API_KEY = "test-api-key";
 
 jest.mock("@amplitude/analytics-browser", () => ({
   init: jest.fn(),

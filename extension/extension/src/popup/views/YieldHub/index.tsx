@@ -18,13 +18,14 @@ import { AppDispatch } from "popup/App";
 import { View } from "popup/basics/layout/View";
 import { ROUTES } from "popup/constants/routes";
 import { navigateTo } from "popup/helpers/navigate";
+import { emitBalancesChanged } from "popup/helpers/balanceEvents";
 import { publicKeySelector } from "popup/ducks/accountServices";
 import { settingsNetworkDetailsSelector } from "popup/ducks/settings";
 import {
-  signFreighterSorobanTransaction,
   signFreighterTransaction,
   submitFreighterTransaction,
 } from "popup/ducks/transactionSubmission";
+import { useSignSorobanXdr } from "popup/hooks/useSignSorobanXdr";
 import { getExplorerUrl, isMainnet } from "helpers/stellar";
 import { yieldHubService } from "api/yieldHubService";
 import {
@@ -181,6 +182,21 @@ const StrategyMixPanel: React.FC<{
 };
 
 /**
+ * Layout wrapper for YieldHub's content. Page mode gets a View.Content wrapper;
+ * tab mode passes children through bare (the Account view already wraps the
+ * MultiPaneSlider in View.Content, and a second wrapper would double padding).
+ *
+ * MUST be at module scope. When this was defined inside YieldHub's render body
+ * it was a new component identity on every render, so React unmounted and
+ * remounted the entire subtree on each keystroke — resetting scroll position
+ * and blowing away input focus (see StrategyMixPanel comment).
+ */
+const Shell: React.FC<{ isTabMode: boolean; children: React.ReactNode }> = ({
+  isTabMode,
+  children,
+}) => (isTabMode ? <>{children}</> : <View.Content>{children}</View.Content>);
+
+/**
  * YieldHub renders the vault hub in two layouts:
  * - `page` (default): full screen with View.Content wrapper, back button,
  *   and large heading. Used when navigated to via ROUTES.yieldHub from the
@@ -205,24 +221,7 @@ export const YieldHub = ({ mode = "page" }: YieldHubProps = {}) => {
   const publicKey = useSelector(publicKeySelector);
   const networkDetails = useSelector(settingsNetworkDetailsSelector);
 
-  const signSorobanXdr = useCallback(
-    async (xdr: string): Promise<string> => {
-      const res = await dispatch(
-        signFreighterSorobanTransaction({
-          transactionXDR: xdr,
-          network: networkDetails.networkPassphrase,
-        }),
-      );
-      if (signFreighterSorobanTransaction.fulfilled.match(res)) {
-        return res.payload.signedTransaction;
-      }
-      throw new Error(
-        res.payload?.errorMessage ||
-          "Failed to sign transaction with internal wallet.",
-      );
-    },
-    [dispatch, networkDetails.networkPassphrase],
-  );
+  const signSorobanXdr = useSignSorobanXdr();
 
   const [status, setStatus] = useState<FetchStatus>(FetchStatus.LOADING);
   const [error, setError] = useState<string | null>(null);
@@ -365,6 +364,9 @@ export const YieldHub = ({ mode = "page" }: YieldHubProps = {}) => {
         if (submitRes.error || submitRes.status === "FAILED") {
           throw new Error(submitRes.error || "Deposit submission failed.");
         }
+        // Tell the Account view to re-fetch wallet balances so the Tokens tab
+        // reflects the spent funds without a close/reopen.
+        emitBalancesChanged();
       } catch (e) {
         setPending({
           asset,
@@ -480,6 +482,9 @@ export const YieldHub = ({ mode = "page" }: YieldHubProps = {}) => {
       });
       setWithdrawShares((p) => ({ ...p, [asset]: "" }));
       await loadAll();
+      if (submitRes.status !== "FAILED" && !submitRes.error) {
+        emitBalancesChanged();
+      }
     } catch (e) {
       setPending({
         asset,
@@ -490,15 +495,9 @@ export const YieldHub = ({ mode = "page" }: YieldHubProps = {}) => {
     }
   };
 
-  // Wrap in View.Content for page mode; pass through bare for tab mode (the
-  // Account view already wraps the MultiPaneSlider in View.Content and a
-  // second wrapper would double the padding).
-  const Shell: React.FC<{ children: React.ReactNode }> = ({ children }) =>
-    isTabMode ? <>{children}</> : <View.Content>{children}</View.Content>;
-
   if (status === FetchStatus.NETWORK_UNSUPPORTED) {
     return (
-      <Shell>
+      <Shell isTabMode={isTabMode}>
         <div className="YieldHub__error">
           <Notification
             variant="warning"
@@ -525,7 +524,7 @@ export const YieldHub = ({ mode = "page" }: YieldHubProps = {}) => {
 
   if (status === FetchStatus.LOADING) {
     return (
-      <Shell>
+      <Shell isTabMode={isTabMode}>
         <div className="YieldHub__loading">
           <Loader />
           <Text as="p" size="sm" color="gray-500">
@@ -538,7 +537,7 @@ export const YieldHub = ({ mode = "page" }: YieldHubProps = {}) => {
 
   if (status === FetchStatus.ERROR) {
     return (
-      <Shell>
+      <Shell isTabMode={isTabMode}>
         <div className="YieldHub__error">
           <Notification variant="error" title={t("Yield Hub unavailable")}>
             {error || t("Baku API did not respond.")}
@@ -559,7 +558,7 @@ export const YieldHub = ({ mode = "page" }: YieldHubProps = {}) => {
   }
 
   return (
-    <Shell>
+    <Shell isTabMode={isTabMode}>
       <div className="YieldHub">
         {!isTabMode && (
           <header className="YieldHub__header">

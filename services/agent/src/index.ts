@@ -16,6 +16,13 @@ import { getOrCreateContractSummary } from './services/contract-summary';
 const app = express();
 const port = process.env.PORT || 3000;
 
+// Deploy-verifiability: /version reports the running commit + whether the
+// Telegram bot actually started polling, so the deploy pipeline (and a plain
+// curl) can confirm the new code is live instead of guessing.
+const BOOT_AT = new Date().toISOString();
+const GIT_SHA = process.env.GIT_SHA || 'unknown';
+let botLaunched = false;
+
 // 1. Initialize DB & Redis
 const mdbUri = process.env.MONGODB_URI || '';
 const redisUrl = process.env.REDIS_URL || 'redis://localhost:6379';
@@ -29,9 +36,16 @@ connectDB(mdbUri);
 initRedis(redisUrl);
 
 // 2. Start Bot & Workers
-bot.launch()
-  .then(() => console.log('Telegram bot launched'))
-  .catch((err) => console.error('[bot] launch failed:', err instanceof Error ? err.message : err));
+// Telegraf's bot.launch() promise only resolves when the bot STOPS (it awaits
+// the long-polling loop), so a `.then()` never fires during normal operation.
+// Treat a successful start optimistically as launched and flip back to false
+// only if launch() rejects during startup (invalid token, getMe failure, etc).
+botLaunched = true;
+bot.launch().catch((err) => {
+  botLaunched = false;
+  console.error('[bot] launch failed:', err instanceof Error ? err.message : err);
+});
+console.log('Telegram bot launching...');
 WorkerManager.initAllWorkers();
 
 // 3. Express API with X402
@@ -59,7 +73,7 @@ app.use(
       }
       return callback(null, origin === walletOrigin);
     },
-    methods: ['GET', 'POST', 'PUT', 'OPTIONS'],
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization'],
   })
 );
@@ -257,8 +271,28 @@ app.get('/api/v1/contract/testnet/:address', async (req, res) => {
 
 app.get('/health', (_req, res) => res.json({ ok: true, t: new Date().toISOString() }));
 
-app.listen(port, () => {
+app.get('/version', (_req, res) =>
+  res.json({ sha: GIT_SHA, botLaunched, bootAt: BOOT_AT })
+);
+
+const server = app.listen(port, () => {
   console.log(`X402 Proxy Server running at http://localhost:${port}`);
+});
+
+// Without an error handler app.listen throws on EADDRINUSE and the process dies
+// with an opaque stack, which pm2 then crash-loops — making deploy verification
+// fail with "Connection reset" instead of a readable reason. Surface it clearly
+// and exit so the process manager retries once the port is free.
+server.on('error', (err: NodeJS.ErrnoException) => {
+  if (err.code === 'EADDRINUSE') {
+    console.error(
+      `[startup] port ${port} already in use — another instance (or a stale ` +
+        `duplicate process) is holding it. Exiting; free the port and restart.`,
+    );
+  } else {
+    console.error('[startup] HTTP server failed to start:', err);
+  }
+  process.exit(1);
 });
 
 process.once('SIGINT', () => bot.stop('SIGINT'));

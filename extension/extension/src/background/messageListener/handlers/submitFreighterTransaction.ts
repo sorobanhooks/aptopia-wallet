@@ -12,7 +12,8 @@ export const submitFreighterTransaction = async ({
   // Configuration for SDK (legacy/fallback)
   wallet.setNetworkConfig({
     network: networkDetails.network === "public" ? "public" : "testnet",
-    apiKey: (wallet as any).config?.apiKey || "qomjjag2a9gq95uhlnzhl",
+    apiKey:
+      (wallet as any).config?.apiKey || process.env.API_KEY || "unconfigured",
   } as any);
 
   try {

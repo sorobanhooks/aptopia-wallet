@@ -11,7 +11,8 @@ export const createTrustline = async ({
   // Configure the wallet for the current network
   wallet.setNetworkConfig({
     network: networkDetails.network === "public" ? "public" : "testnet",
-    apiKey: (wallet as any).config?.apiKey || "qomjjag2a9gq95uhlnzhl",
+    apiKey:
+      (wallet as any).config?.apiKey || process.env.API_KEY || "unconfigured",
   } as any);
 
   if (activePublicKey) {

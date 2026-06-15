@@ -6,8 +6,9 @@
   "scripts": {
     "dev": "bun --watch run src/index.ts",
     "start": "bun run src/index.ts",
-    "test": "bun test",
-    "tracer:digest-parity": "bun run scripts/tracer-digest-parity.ts"
+    "test": "bun test --isolate",
+    "tracer:digest-parity": "bun run scripts/tracer-digest-parity.ts",
+    "tracer:swap-build": "bun run scripts/tracer-swap-build.ts"
   },
   "devDependencies": {
     "@types/bun": "latest"

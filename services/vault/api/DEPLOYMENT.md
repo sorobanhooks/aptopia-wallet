@@ -1,18 +1,125 @@
 # Baku API — VM Deployment Guide
 
-This document describes how to deploy the Baku API (`palmyra/api`) on a Linux
-VM behind nginx with TLS, managed by `systemd`.
+This document describes how to deploy the Baku API (`vault/api` in the
+`xyra-monorepo`) on a Linux VM behind nginx with TLS, managed by `systemd` or
+Docker.
 
 The API is a Bun + Hono process. It is **stateless** apart from a 3-second
 in-memory cache, holds **no secrets** (all signing happens client-side in the
 wallet), and depends only on an outbound Soroban RPC endpoint.
+
+> **Sections 1–13** are the full greenfield (fresh-VM) guide.
+> **Section 0** (below) is the fast path for **our current scenario**: adding
+> the Baku API to the **VM that already runs the agent backend**. Start there.
+
+---
+
+## 0. Fast path — add Baku API to the existing Xyra VM
+
+We already run the **agent backend** on a VM. The Baku API is fully independent
+of it, so co-hosting is low-risk:
+
+| Concern        | Baku API                          | Agent backend                       |
+| -------------- | --------------------------------- | ----------------------------------- |
+| Port           | **8787**                          | 3000 / 4000                         |
+| Datastore      | none (3 s in-memory cache only)   | MongoDB + Redis                     |
+| Secrets        | **none** (key-less, build-tx only)| KEK, JWT, Gemini, Telegram, x402    |
+| External deps  | Soroban RPC (outbound HTTPS)      | Soroban RPC, Mongo, Redis, x402     |
+
+No shared DB, no shared port, no shared secrets — the two processes don't
+interact. Pick whichever install style the VM already uses.
+
+### 0.1 Get the code onto the VM
+
+The Baku API lives in `vault/api` of the monorepo. Clone the whole monorepo
+(small) and work inside that folder:
+
+```bash
+git clone https://github.com/Blockchain-AI-Apps/xyra-monorepo.git
+cd xyra-monorepo/vault/api
+```
+
+For a private repo, `gh auth login` (or a deploy key) first. To refresh later:
+`git -C ~/xyra-monorepo pull`.
+
+### 0.2 Option A — Docker (if the VM already runs the agent in Docker)
+
+The repo ships `vault/api/docker-compose.yml`. It builds the image, binds
+`:8787`, and self-restarts. From `vault/api`:
+
+```bash
+# testnet defaults are baked into the compose `environment:` block.
+docker compose up -d --build
+docker compose logs -f          # watch
+curl http://127.0.0.1:8787/health   # {"ok":true,...}
+```
+
+The compose file's container is named `baku-api` and uses
+`restart: unless-stopped`. It runs `bun --watch` (hot reload) — fine for a demo
+host. For a stricter production image, swap the `CMD` to `bun run src/index.ts`
+(no watch) or use the standalone `docker run` in §13.
+
+To override network/RPC, create `vault/api/.env` (see §5) — compose reads it.
+
+### 0.3 Option B — systemd + Bun (no Docker)
+
+Follow the greenfield flow but with monorepo paths. Condensed:
+
+```bash
+# Bun (once, as the service user)
+curl -fsSL https://bun.sh/install | bash
+
+# Code
+cd ~/xyra-monorepo/vault/api
+~/.bun/bin/bun install --production
+
+# Run via systemd — see §6, but set:
+#   WorkingDirectory=/home/<user>/xyra-monorepo/vault/api
+#   ExecStart=/home/<user>/.bun/bin/bun run src/index.ts
+```
+
+### 0.4 Expose it (nginx)
+
+The VM likely already has nginx fronting the agent backend. Add **one more
+server block** (a dedicated subdomain is cleanest, e.g. `baku.<domain>` or
+`vault-api.<domain>`) pointing at `127.0.0.1:8787`. Use the block in §7 and the
+TLS step in §8 verbatim — just change `server_name` and `proxy_pass` port.
+
+If you prefer a single host, route by path instead (note: the API serves from
+`/`, so a path prefix needs a rewrite):
+
+```nginx
+location /baku/ {
+    proxy_pass http://127.0.0.1:8787/;   # trailing slash strips /baku
+    proxy_set_header Host $host;
+    proxy_set_header X-Forwarded-Proto $scheme;
+}
+```
+
+A subdomain avoids the rewrite and matches how the extension expects a clean
+base URL — recommended.
+
+### 0.5 Verify + wire the extension
+
+```bash
+curl https://baku.<domain>/health
+curl https://baku.<domain>/addresses
+curl https://baku.<domain>/vault/xlm/state
+```
+
+Then set the extension's `BAKU_API_URL` (in `extension/extension/.env`) to
+`https://baku.<domain>` and rebuild (`cd extension && yarn build`).
+
+CORS is already enabled app-side (`src/index.ts` → `app.use("*", cors())`), so
+the extension popup and dashboards can call it cross-origin out of the box.
+Tighten the allow-list before any public/mainnet use (see §10).
 
 ---
 
 ## 1. Architecture at a glance
 
 ```
- wallet (Aptopia extension)
+ wallet (Xyra extension)
         │  HTTPS
         ▼
    ┌─────────┐      ┌──────────────┐      ┌──────────────────┐
@@ -74,8 +181,8 @@ As the `baku` user:
 
 ```bash
 sudo -iu baku
-git clone <your-repo-url> palmyra
-cd palmyra/api
+git clone https://github.com/Blockchain-AI-Apps/xyra-monorepo.git
+cd xyra-monorepo/vault/api
 ~/.bun/bin/bun install --production
 ```
 
@@ -85,7 +192,7 @@ For a private repo, use a deploy key or `gh auth login` before cloning.
 
 ## 5. Environment configuration
 
-Create `/home/baku/palmyra/api/.env`:
+Create `~/xyra-monorepo/vault/api/.env`:
 
 ```bash
 # Port the Bun server listens on (loopback only; nginx fronts it)
@@ -112,7 +219,7 @@ ADMIN_ADDR=GCWHACNPCEV6FPANBP3WMHFSR3LXMZO5CNIZNEKEKV7PAM2TBJ5HEVTV
 Lock it down:
 
 ```bash
-chmod 600 /home/baku/palmyra/api/.env
+chmod 600 ~/xyra-monorepo/vault/api/.env
 ```
 
 ### Environment variables reference
@@ -141,8 +248,8 @@ Wants=network-online.target
 Type=simple
 User=baku
 Group=baku
-WorkingDirectory=/home/baku/palmyra/api
-EnvironmentFile=/home/baku/palmyra/api/.env
+WorkingDirectory=/home/baku/xyra-monorepo/vault/api
+EnvironmentFile=/home/baku/xyra-monorepo/vault/api/.env
 ExecStart=/home/baku/.bun/bin/bun run src/index.ts
 Restart=always
 RestartSec=3
@@ -154,7 +261,7 @@ NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
 ProtectHome=read-only
-ReadWritePaths=/home/baku/palmyra/api
+ReadWritePaths=/home/baku/xyra-monorepo/vault/api
 
 [Install]
 WantedBy=multi-user.target
@@ -248,17 +355,19 @@ Expected:
 - `/vault/xlm/state` → vault state (total assets, price per share, APY, active
   strategy address).
 
-Then point the Aptopia wallet extension's API base URL at
-`https://api.example.com` and exercise a deposit end-to-end.
+Then point the Xyra wallet extension's `BAKU_API_URL` at
+`https://api.example.com` (or your `baku.<domain>`) and exercise a deposit
+end-to-end.
 
 ---
 
 ## 10. CORS
 
-`hono/cors` is not currently enabled in `src/index.ts`. If you serve a browser
-client from a different origin and see blocked requests:
+`hono/cors` **is enabled** in `src/index.ts` with a permissive default
+(`app.use("*", cors())`) — fine for testnet/demo. For production, tighten the
+origin allow-list:
 
-**Option A — at the app layer** (preferred). Add to `src/index.ts`:
+**Option A — at the app layer** (preferred). Edit `src/index.ts`:
 
 ```ts
 import { cors } from "hono/cors";
@@ -280,15 +389,15 @@ if ($request_method = OPTIONS) { return 204; }
 
 ```bash
 sudo -iu baku
-cd ~/palmyra && git pull
-cd api && ~/.bun/bin/bun install --production
+cd ~/xyra-monorepo && git pull
+cd vault/api && ~/.bun/bin/bun install --production
 exit
 sudo systemctl restart baku-api
 journalctl -u baku-api -n 50 --no-pager
 ```
 
 Rollback is `git checkout <prev-sha> && bun install --production && systemctl
-restart baku-api`.
+restart baku-api`. (Docker path: `git pull && docker compose up -d --build`.)
 
 ---
 

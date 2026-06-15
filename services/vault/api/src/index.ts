@@ -10,6 +10,7 @@ import { cors } from "hono/cors";
 import { logger } from "hono/logger";
 import { balanceRoutes } from "./routes/balance";
 import { submitRoutes } from "./routes/submit";
+import { swapRoutes } from "./routes/swap";
 import { vaultRoutes } from "./routes/vault";
 
 const PORT = Number(process.env.PORT ?? 8787);
@@ -34,6 +35,7 @@ app.get("/", (c) =>
       "POST /vault/:asset/withdraw/build-tx",
       "GET  /balance/:address",
       "POST /tx/submit",
+      "POST /swap/build-tx",
       "GET  /health",
     ],
   }),
@@ -44,6 +46,7 @@ app.get("/health", (c) => c.json({ ok: true, t: new Date().toISOString() }));
 app.route("/", vaultRoutes);
 app.route("/", balanceRoutes);
 app.route("/", submitRoutes);
+app.route("/", swapRoutes);
 
 console.log(`baku-api listening on http://localhost:${PORT}`);
 

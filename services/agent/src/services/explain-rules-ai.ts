@@ -1,4 +1,5 @@
 import { applyGuardrail } from './narrate-log-ai';
+import { geminiApiKey, geminiModel } from '../config';
 
 // ---------------------------------------------------------------------------
 // Rule-explainer types
@@ -42,9 +43,9 @@ export function buildFallbackExplanation(rules: AgentRuleFields): string {
  * guardrail rejection) returns the deterministic fallback — never throws.
  */
 export async function explainRulesWithGemini(rules: AgentRuleFields): Promise<string> {
-  const apiKey = process.env.GEMINI_API_KEY;
+  const apiKey = geminiApiKey;
   if (!apiKey) {
-    console.warn('[explain-rules-ai] GEMINI_API_KEY not set — using fallback explanation');
+    console.warn('[explain-rules-ai] GEMINI_API_KEY not set (or placeholder) — using fallback explanation');
     return buildFallbackExplanation(rules);
   }
 
@@ -63,7 +64,7 @@ export async function explainRulesWithGemini(rules: AgentRuleFields): Promise<st
   ].join('\n');
 
   try {
-    const model = process.env.GEMINI_MODEL || 'gemini-3.5-flash';
+    const model = geminiModel;
     const response = await fetch(
       `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(apiKey)}`,
       {

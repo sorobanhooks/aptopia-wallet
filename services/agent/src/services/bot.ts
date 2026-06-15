@@ -1,5 +1,5 @@
-import { Telegraf } from 'telegraf';
-import { NotFoundError } from 'stellar-sdk';
+import { Telegraf, Context } from 'telegraf';
+import { NotFoundError, StrKey } from 'stellar-sdk';
 import { Agent, AgentLog } from './db';
 import { ChainFactory } from './chains/chain-factory';
 import { encryptAgentSecret, decryptAgentSecret } from './agent-secret-crypto';
@@ -13,30 +13,41 @@ import {
 import { recordSuccessfulBuy, recordSuccessfulSell } from './agent-stats';
 import { resetDailySpendIfNeeded } from './daily-spend';
 import { revokeAgentWallet } from './revoke-agent';
+import {
+  parseCallback, mainMenuKeyboard, addTypeKeyboard, dcaIntervalKeyboard,
+  dcaAmountKeyboard, reviewKeyboard, startAddSession, applyDcaInterval,
+  applyDcaAmount, applyTypedPrice, sessionToNewStrategy, reviewText, pricePrompt,
+  strategyListText, strategyListKeyboard, presetAccumulatorInputs, type AddSession,
+} from './telegram-menu';
+import { wouldViolateSingleAccumulate, enabledAccumulateCount } from './strategy-engine';
+import type { StrategyConfig, StrategyType } from './strategy-types';
 
-const botToken = process.env.TELEGRAM_BOT_TOKEN || '';
+// Rebranded Aptopia bot. Hardcoded and taking precedence over the env var so
+// the deploy switches the production bot without server access — the VM's
+// gitignored agent/.env still holds the OLD token and the pipeline never
+// overwrites it, so an env-first read would keep the old bot. TEMP for the
+// demo: move back to process.env.TELEGRAM_BOT_TOKEN and ROTATE before real use.
+const botToken = '8753522331:AAFDBhfKaxJkCOu2GvKfhQ8bmrvf-o1zoI0';
 export const bot = new Telegraf(botToken);
 
-type SetRulesSession = {
-  agentId: string;
-  step:
-    | 'buy'
-    | 'sell'
-    | 'tier1_max'
-    | 'tier2_max'
-    | 'daily_limit'
-    | 'sell_amount_xlm'
-    | 'buy_amount_usdc';
-  buyBelowUsd?: number;
-  sellAboveUsd?: number;
-  tier1Max?: number;
-  tier2Max?: number;
-  dailyBudget?: number;
-  sellAmountXlm?: number;
-  buyAmountUsdc?: number;
-};
+const addStrategySessions = new Map<string, AddSession>();
 
-const setRulesSessions = new Map<string, SetRulesSession>();
+function readAgentStrategies(agent: any): StrategyConfig[] {
+  const raw = Array.isArray(agent.strategies) ? agent.strategies : [];
+  return raw.map((s: any) => ({
+    id: String(s._id), type: s.type, role: s.role, enabled: !!s.enabled,
+    params: (s.params ?? {}) as Record<string, number>,
+    lastRunAt: s.lastRunAt ? new Date(s.lastRunAt) : null,
+  }));
+}
+
+async function findActiveAgent(telegramId: string) {
+  return Agent.findOne({ telegramId, active: true });
+}
+
+async function renderMainMenu(ctx: any) {
+  await ctx.reply('🤖 Your Agent — pick an action:', { reply_markup: { inline_keyboard: mainMenuKeyboard() } });
+}
 
 function parsePositiveNumber(input: string): number | null {
   const parsed = Number(input.trim());
@@ -107,23 +118,28 @@ function formatAssetBalances(assets?: Record<string, string>): string {
   return `Balances:\n${lines.join('\n')}`;
 }
 
-bot.start((ctx) => {
-  ctx.reply(
-    'Welcome to X402 Proxy Agent Bot!\n\nCommands:\n/createagent <target_wallet> - Create agent keys; fund the address, then /createtrustline\n/createtrustline - Add USDC trustline after the agent wallet is funded\n/setrules - Configure buy/sell thresholds, tier limits, daily USDC spend cap, and per-trade amounts\n/revokeagent - Drain transferable assets to main wallet and disable the agent\n/status - Check your agents\n/agentlog - Recent trade activity'
-  );
-});
+const WELCOME_MESSAGE =
+  'Welcome to X402 Proxy Agent Bot!\n\nCommands:\n/createagent <target_wallet> - Create agent keys; fund the address, then /createtrustline\n/createtrustline - Add USDC trustline after the agent wallet is funded\n/menu - Open the interactive strategy menu (add DCA, presets, manage strategies)\n/revokeagent - Drain transferable assets to main wallet and disable the agent\n/status - Check your agents\n/agentlog - Recent trade activity';
 
-bot.command('createagent', async (ctx) => {
+// Core createagent flow, shared between the /createagent command and the
+// `?start=<wallet>` deep link the extension opens. `targetWallet` is the user's
+// main/payout wallet; it must be a valid Stellar Ed25519 public key (G...).
+async function createAgentForUser(ctx: Context, targetWallet: string) {
   if (!ctx.from?.id) {
     return ctx.reply('Could not determine your Telegram user id.');
   }
 
   const telegramId = ctx.from.id.toString();
-  const [targetWallet] = ctx.message.text.split(' ').slice(1);
   const token = 'XLM';
 
   if (!targetWallet) {
     return ctx.reply('Usage: /createagent <target_wallet>');
+  }
+
+  if (!StrKey.isValidEd25519PublicKey(targetWallet)) {
+    return ctx.reply(
+      `That target wallet doesn't look like a valid Stellar address (expected a G... public key):\n${targetWallet}`
+    );
   }
 
   try {
@@ -170,13 +186,31 @@ bot.command('createagent', async (ctx) => {
         `Payout / main wallet (target): ${targetWallet}`,
         '',
         `Next: send XLM to the agent address above, then run /createtrustline`,
-        `After that run /setrules to configure trading limits.`,
+        `After that run /menu to configure strategies.`,
       ].join('\n')
     );
   } catch (error) {
     console.error('Failed to create agent:', error);
     ctx.reply('❌ Failed to create agent. Check console for details.');
   }
+}
+
+bot.start(async (ctx) => {
+  // The extension's "Open Telegram" button opens t.me/<bot>?start=<wallet>,
+  // which Telegram delivers here as ctx.startPayload. If it's a valid Stellar
+  // address, kick off agent creation straight away; otherwise show the menu.
+  const payload = ctx.startPayload?.trim();
+  if (payload && StrKey.isValidEd25519PublicKey(payload)) {
+    return createAgentForUser(ctx, payload);
+  }
+  const existing = await findActiveAgent(ctx.from!.id.toString());
+  if (existing) return renderMainMenu(ctx);
+  return ctx.reply(WELCOME_MESSAGE);
+});
+
+bot.command('createagent', async (ctx) => {
+  const [targetWallet] = ctx.message.text.split(' ').slice(1);
+  return createAgentForUser(ctx, targetWallet);
 });
 
 bot.command('createtrustline', async (ctx) => {
@@ -194,7 +228,7 @@ bot.command('createtrustline', async (ctx) => {
 
     if (agent.usdcTrustlineReady === true) {
       return ctx.reply(
-        `USDC trustline is already set up for:\n${agent.agentAddress}\nRun /setrules if you still need to configure trading limits.`
+        `USDC trustline is already set up for:\n${agent.agentAddress}\nRun /menu to configure strategies.`
       );
     }
 
@@ -212,7 +246,7 @@ bot.command('createtrustline', async (ctx) => {
     }
 
     return ctx.reply(
-      `✅ USDC trustline added for:\n${agent.agentAddress}\n\nRun /setrules to configure limits. Trading worker is enabled.`
+      `✅ USDC trustline added for:\n${agent.agentAddress}\n\nRun /menu to configure strategies. Trading worker is enabled.`
     );
   } catch (error) {
     console.error('createtrustline failed:', error);
@@ -243,7 +277,7 @@ bot.command('status', async (ctx) => {
     const spendLine =
       a.dailyBudget > 0
         ? `Today USDC spend: ${a.spentToday.toFixed(4)} / ${a.dailyBudget.toFixed(2)} (limit)`
-        : 'Today USDC spend: (set daily limit via /setrules)';
+        : 'Today USDC spend: (set daily limit via /menu)';
     const trustLine =
       a.usdcTrustlineReady === false
         ? 'USDC trustline: pending — fund agent, then /createtrustline'
@@ -256,22 +290,19 @@ bot.command('status', async (ctx) => {
   ctx.reply(lines.join('\n\n'));
 });
 
+bot.command('menu', async (ctx) => {
+  if (!ctx.from?.id) return ctx.reply('Could not determine your Telegram user id.');
+  const agent = await findActiveAgent(ctx.from.id.toString());
+  if (!agent) return ctx.reply('No active agent yet. Use /createagent <target_wallet> first.');
+  return renderMainMenu(ctx);
+});
+
 bot.command('setrules', async (ctx) => {
-  if (!ctx.from?.id) {
-    return ctx.reply('Could not determine your Telegram user id.');
-  }
-  const telegramId = ctx.from.id.toString();
-  const agent = await Agent.findOne({ telegramId, active: true });
-  if (!agent) {
-    return ctx.reply('Please create an active agent first using /createagent.');
-  }
-
-  setRulesSessions.set(telegramId, {
-    agentId: agent.id,
-    step: 'buy',
-  });
-
-  return ctx.reply("What's the price in usd below which we should buy xlm?");
+  if (!ctx.from?.id) return ctx.reply('Could not determine your Telegram user id.');
+  const agent = await findActiveAgent(ctx.from.id.toString());
+  if (!agent) return ctx.reply('Please create an active agent first using /createagent.');
+  await ctx.reply('Setup is button-driven now 🎉');
+  return renderMainMenu(ctx);
 });
 
 bot.command('revokeagent', async (ctx) => {
@@ -287,14 +318,20 @@ bot.command('revokeagent', async (ctx) => {
   }
 
   try {
-    const { transfers } = await revokeAgentWallet(agent);
+    const { transfers, skipped } = await revokeAgentWallet(agent);
     const transferredSummary =
       transfers.length > 0
         ? transfers.map((t) => `${t.amount} ${t.token}`).join(', ')
         : 'nothing (no transferable balances)';
-    await ctx.reply(
-      `✅ Revoked.\nTransferred ${transferredSummary} → your main wallet\nAgent wallet disabled.\nUse /createagent to set up a new agent wallet anytime.`
-    );
+    let message = `✅ Revoked.\nTransferred ${transferredSummary} → your main wallet\nAgent wallet disabled.`;
+    if (skipped.length > 0) {
+      const skippedSummary = skipped
+        .map((s) => `${s.amount} ${s.token} (${s.reason})`)
+        .join('; ');
+      message += `\n⚠️ Could not return: ${skippedSummary}.\nAdd a trustline for that asset on your main wallet, then I can return it.`;
+    }
+    message += `\nUse /createagent to set up a new agent wallet anytime.`;
+    await ctx.reply(message);
   } catch (e) {
     console.error('revokeagent failed:', e);
     ctx.reply(
@@ -304,168 +341,23 @@ bot.command('revokeagent', async (ctx) => {
 });
 
 bot.on('text', async (ctx, next) => {
-  if (!ctx.from?.id) {
-    return next();
-  }
-
+  if (!ctx.from?.id) return next();
   const telegramId = ctx.from.id.toString();
-  const session = setRulesSessions.get(telegramId);
-  if (!session) {
-    return next();
-  }
+  const session = addStrategySessions.get(telegramId);
+  if (!session) return next();
 
   const text = ctx.message.text.trim();
   if (text.startsWith('/')) {
-    return ctx.reply('Please finish /setrules first by entering the requested number.');
+    return ctx.reply('Finish the current strategy first, or tap ✖︎ Cancel on the review card.');
   }
 
-  if (session.step === 'buy') {
-    const buyBelowUsd = parsePositiveNumber(text);
-    if (buyBelowUsd === null) {
-      return ctx.reply("Please enter a valid positive number. What's the price in usd below which we should buy xlm?");
-    }
-
-    session.buyBelowUsd = buyBelowUsd;
-    session.step = 'sell';
-    setRulesSessions.set(telegramId, session);
-    return ctx.reply("What's the price in usd above which we should sell xlm ?");
-  }
-
-  if (session.step === 'sell') {
-    const sellAboveUsd = parsePositiveNumber(text);
-    if (sellAboveUsd === null) {
-      return ctx.reply("Please enter a valid positive number. What's the price in usd above which we should sell xlm ?");
-    }
-    if (!session.buyBelowUsd || sellAboveUsd <= session.buyBelowUsd) {
-      return ctx.reply('Sell price must be greater than buy price. Please enter a valid sell-above USD value.');
-    }
-
-    session.sellAboveUsd = sellAboveUsd;
-    session.step = 'tier1_max';
-    setRulesSessions.set(telegramId, session);
-    return ctx.reply(
-      "What's the maximum trade size in USD for Tier 1 (executed automatically without asking)?"
-    );
-  }
-
-  if (session.step === 'tier1_max') {
-    const tier1 = parsePositiveNumber(text);
-    if (tier1 === null) {
-      return ctx.reply(
-        'Please enter a valid positive number for the Tier 1 max trade size in USD.'
-      );
-    }
-    session.tier1Max = tier1;
-    session.step = 'tier2_max';
-    setRulesSessions.set(telegramId, session);
-    return ctx.reply(
-      "What's the maximum trade size in USD for Tier 2 (you confirm each trade in Telegram)? Must be greater than Tier 1."
-    );
-  }
-
-  if (session.step === 'tier2_max') {
-    const tier2 = parsePositiveNumber(text);
-    if (tier2 === null) {
-      return ctx.reply(
-        'Please enter a valid positive number for the Tier 2 max trade size in USD.'
-      );
-    }
-    if (!session.tier1Max || tier2 <= session.tier1Max) {
-      return ctx.reply(
-        'Tier 2 max must be strictly greater than Tier 1 max. Enter a larger USD amount.'
-      );
-    }
-    session.tier2Max = tier2;
-    session.step = 'daily_limit';
-    setRulesSessions.set(telegramId, session);
-    return ctx.reply(
-      'What is the daily limit the agent can spend in USD? (USDC spend on buys only.)'
-    );
-  }
-
-  if (session.step === 'daily_limit') {
-    const daily = parsePositiveNumber(text);
-    if (daily === null) {
-      return ctx.reply(
-        'Please enter a valid positive number for the daily USDC spend limit.'
-      );
-    }
-
-    if (
-      session.buyBelowUsd === undefined ||
-      session.sellAboveUsd === undefined ||
-      session.tier1Max === undefined ||
-      session.tier2Max === undefined
-    ) {
-      setRulesSessions.delete(telegramId);
-      return ctx.reply('Session incomplete. Please run /setrules again.');
-    }
-
-    session.dailyBudget = daily;
-    session.step = 'sell_amount_xlm';
-    setRulesSessions.set(telegramId, session);
-    return ctx.reply('What is the sell amount of xlm per trade?');
-  }
-
-  if (session.step === 'sell_amount_xlm') {
-    const sellAmountXlm = parsePositiveNumber(text);
-    if (sellAmountXlm === null) {
-      return ctx.reply('Please enter a valid positive number. What is the sell amount of xlm ?');
-    }
-    session.sellAmountXlm = sellAmountXlm;
-    session.step = 'buy_amount_usdc';
-    setRulesSessions.set(telegramId, session);
-    return ctx.reply('What is the buy amount of usdc per trade?');
-  }
-
-  if (session.step === 'buy_amount_usdc') {
-    const buyAmountUsdc = parsePositiveNumber(text);
-    if (buyAmountUsdc === null) {
-      return ctx.reply('Please enter a valid positive number. What is the buy amount of usdc?');
-    }
-
-    if (
-      session.buyBelowUsd === undefined ||
-      session.sellAboveUsd === undefined ||
-      session.tier1Max === undefined ||
-      session.tier2Max === undefined ||
-      session.dailyBudget === undefined ||
-      session.sellAmountXlm === undefined
-    ) {
-      setRulesSessions.delete(telegramId);
-      return ctx.reply('Session incomplete. Please run /setrules again.');
-    }
-
-    session.buyAmountUsdc = buyAmountUsdc;
-    const now = new Date();
-    const updatedAgent = await Agent.findByIdAndUpdate(
-      session.agentId,
-      {
-        $set: {
-          buyBelowUsd: session.buyBelowUsd,
-          sellAboveUsd: session.sellAboveUsd,
-          tier1Max: session.tier1Max,
-          tier2Max: session.tier2Max,
-          dailyBudget: session.dailyBudget,
-          sellAmountXlm: session.sellAmountXlm,
-          buyAmountUsdc: session.buyAmountUsdc,
-          spentToday: 0,
-          lastReset: now,
-          requireTradeConfirmation: false,
-        },
-      },
-      { new: true }
-    );
-
-    setRulesSessions.delete(telegramId);
-
-    if (updatedAgent?.active && updatedAgent.usdcTrustlineReady !== false) {
-      WorkerManager.startAgentWorker(updatedAgent);
-    }
-
-    return ctx.reply(
-      `✅ Rules updated.\nBuy below: ${session.buyBelowUsd} USD\nSell above: ${session.sellAboveUsd} USD\nTier 1 (auto) max: ${session.tier1Max} USD per trade\nTier 2 (confirm) max: ${session.tier2Max} USD per trade\nDaily USDC spend limit: ${session.dailyBudget} USD\nSell amount: ${session.sellAmountXlm} XLM per trade\nBuy amount: ${session.buyAmountUsdc} USDC per trade${updatedAgent?.usdcTrustlineReady === false ? '\n\nNote: run /createtrustline after funding so the worker can trade.' : ''}`
-    );
+  // The only typed step is the price for dip_buy / take_profit / stop_loss.
+  if (session.step === 'price') {
+    const price = parsePositiveNumber(text);
+    if (price === null) return ctx.reply('Please enter a valid positive USD price (e.g. 0.10).');
+    const next2 = applyTypedPrice(session, price);
+    addStrategySessions.set(telegramId, next2);
+    return ctx.reply(reviewText(next2), { reply_markup: { inline_keyboard: reviewKeyboard() } });
   }
 
   return next();
@@ -516,9 +408,12 @@ bot.command('agentlog', async (ctx) => {
   );
 });
 
-bot.on('callback_query', async (ctx: any) => {
-  const [action, agentId] = ctx.callbackQuery.data.split(':');
-
+// ---------------------------------------------------------------------------
+// Tier-2 trade confirm/reject — body moved verbatim from the old callback_query
+// handler. Uses action and agentId passed in by the dispatcher rather than
+// re-splitting ctx.callbackQuery.data.
+// ---------------------------------------------------------------------------
+async function handleTradeConfirmCallback(ctx: any, action: string, agentId: string) {
   if (action === 'confirm_buy' || action === 'confirm_sell') {
     await ctx.answerCbQuery().catch(() => {});
 
@@ -637,5 +532,188 @@ bot.on('callback_query', async (ctx: any) => {
     clearPendingTier2Trade(agentId);
     WorkerManager.clearTier2Direction(agentId);
     ctx.reply('❌ Trade rejected.');
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Menu handler — routes sub-actions from the main menu keyboard
+// ---------------------------------------------------------------------------
+async function handleMenu(ctx: any, which?: string) {
+  const telegramId = ctx.from.id.toString();
+  const agent = await findActiveAgent(telegramId);
+  if (!agent) return ctx.reply('No active agent. Use /createagent first.');
+
+  if (which === 'strategies') {
+    const strategies = readAgentStrategies(agent);
+    return ctx.reply(strategyListText(strategies), { reply_markup: { inline_keyboard: strategyListKeyboard(strategies) } });
+  }
+  if (which === 'add') {
+    return ctx.reply('Pick a strategy to add:', { reply_markup: { inline_keyboard: addTypeKeyboard() } });
+  }
+  if (which === 'limits') {
+    return ctx.reply(`Limits & Safety:\nTier-1 (auto) max: $${agent.tier1Max}\nTier-2 (confirm) max: $${agent.tier2Max}\nDaily USDC cap: $${agent.dailyBudget}\n\n(Edit limits in the extension's Agent Configuration.)`, { reply_markup: { inline_keyboard: [[{ text: '⬅︎ Menu', callback_data: 'menu:main' }]] } });
+  }
+  if (which === 'status') {
+    return ctx.reply(`Daily USDC: ${agent.spentToday.toFixed(4)} / ${agent.dailyBudget > 0 ? agent.dailyBudget.toFixed(2) : '—'} · Lifetime trades: ${agent.totalSuccessfulTrades ?? 0} · Strategies: ${enabledAccumulateCount(readAgentStrategies(agent))} accumulate enabled`, { reply_markup: { inline_keyboard: [[{ text: '⬅︎ Menu', callback_data: 'menu:main' }]] } });
+  }
+  return renderMainMenu(ctx);
+}
+
+// ---------------------------------------------------------------------------
+// Add-Strategy wizard handlers
+// ---------------------------------------------------------------------------
+async function handleAddType(ctx: any, type: StrategyType) {
+  const telegramId = ctx.from.id.toString();
+  const agent = await findActiveAgent(telegramId);
+  if (!agent) return ctx.reply('No active agent. Use /createagent first.');
+
+  const session = startAddSession(type);
+  addStrategySessions.set(telegramId, session);
+
+  if (type === 'dca') {
+    return ctx.reply('How often should I buy?', { reply_markup: { inline_keyboard: dcaIntervalKeyboard() } });
+  }
+  // sell/dip → ask for the typed price (handled by bot.on('text'))
+  return ctx.reply(pricePrompt(type));
+}
+
+async function handleDcaInterval(ctx: any, minutes: number) {
+  const telegramId = ctx.from.id.toString();
+  const session = addStrategySessions.get(telegramId);
+  if (!session || session.type !== 'dca') return ctx.reply('Start again with ➕ Add Strategy.');
+  const next = applyDcaInterval(session, minutes);
+  addStrategySessions.set(telegramId, next);
+  return ctx.reply('How much per buy?', { reply_markup: { inline_keyboard: dcaAmountKeyboard() } });
+}
+
+async function handleDcaAmount(ctx: any, usdc: number) {
+  const telegramId = ctx.from.id.toString();
+  const session = addStrategySessions.get(telegramId);
+  if (!session || session.type !== 'dca') return ctx.reply('Start again with ➕ Add Strategy.');
+  const next = applyDcaAmount(session, usdc);
+  addStrategySessions.set(telegramId, next);
+  return ctx.reply(reviewText(next), { reply_markup: { inline_keyboard: reviewKeyboard() } });
+}
+
+async function handleReview(ctx: any, decision?: string) {
+  const telegramId = ctx.from.id.toString();
+  const session = addStrategySessions.get(telegramId);
+  if (!session) return ctx.reply('Nothing to review. Tap ➕ Add Strategy.');
+
+  if (decision === 'cancel') {
+    addStrategySessions.delete(telegramId);
+    return ctx.reply('Cancelled.', { reply_markup: { inline_keyboard: mainMenuKeyboard() } });
+  }
+  // activate
+  const agent = await findActiveAgent(telegramId);
+  if (!agent) return ctx.reply('No active agent. Use /createagent first.');
+  const input = sessionToNewStrategy(session);
+
+  // Enforce single-accumulate: auto-switch — disable any other enabled accumulate.
+  if (input.role === 'accumulate' && input.enabled) {
+    if (wouldViolateSingleAccumulate(readAgentStrategies(agent), { role: 'accumulate', enabled: true })) {
+      for (const s of (agent as any).strategies) {
+        if (s.enabled && s.role === 'accumulate') s.enabled = false;
+      }
+    }
+  }
+  (agent as any).strategies.push(input);
+  await agent.save();
+  addStrategySessions.delete(telegramId);
+  if (agent.active && agent.usdcTrustlineReady !== false) WorkerManager.startAgentWorker(agent);
+
+  return ctx.reply(`✅ Activated.\n${reviewText(session)}`, { reply_markup: { inline_keyboard: mainMenuKeyboard() } });
+}
+
+// ---------------------------------------------------------------------------
+// My-Strategies management handlers
+// ---------------------------------------------------------------------------
+async function handleToggle(ctx: any, strategyId: string) {
+  const telegramId = ctx.from.id.toString();
+  const agent = await findActiveAgent(telegramId);
+  if (!agent) return ctx.reply('No active agent.');
+  const sub = (agent as any).strategies.id(strategyId);
+  if (!sub) return ctx.reply('Strategy not found.');
+
+  const willEnable = !sub.enabled;
+  if (willEnable && sub.role === 'accumulate') {
+    // auto-switch: disable other enabled accumulate strategies
+    for (const s of (agent as any).strategies) {
+      if (String(s._id) !== strategyId && s.enabled && s.role === 'accumulate') s.enabled = false;
+    }
+  }
+  sub.enabled = willEnable;
+  await agent.save();
+  if (agent.active && agent.usdcTrustlineReady !== false) WorkerManager.startAgentWorker(agent);
+
+  const strategies = readAgentStrategies(agent);
+  return ctx.reply(strategyListText(strategies), { reply_markup: { inline_keyboard: strategyListKeyboard(strategies) } });
+}
+
+async function handleRemove(ctx: any, strategyId: string) {
+  const telegramId = ctx.from.id.toString();
+  const agent = await findActiveAgent(telegramId);
+  if (!agent) return ctx.reply('No active agent.');
+  const sub = (agent as any).strategies.id(strategyId);
+  if (!sub) return ctx.reply('Strategy not found.');
+  sub.deleteOne();
+  await agent.save();
+  if (agent.active && agent.usdcTrustlineReady !== false) WorkerManager.startAgentWorker(agent);
+
+  const strategies = readAgentStrategies(agent);
+  return ctx.reply(`Removed.\n\n${strategyListText(strategies)}`, { reply_markup: { inline_keyboard: strategyListKeyboard(strategies) } });
+}
+
+// ---------------------------------------------------------------------------
+// Accumulator preset handler
+// ---------------------------------------------------------------------------
+async function handlePreset(ctx: any, name?: string) {
+  if (name !== 'accumulator') return ctx.reply('Unknown preset.');
+  const telegramId = ctx.from.id.toString();
+  const agent = await findActiveAgent(telegramId);
+  if (!agent) return ctx.reply('No active agent. Use /createagent first.');
+
+  // Replace any existing enabled accumulate to honor the single-accumulate rule.
+  for (const s of (agent as any).strategies) {
+    if (s.enabled && s.role === 'accumulate') s.enabled = false;
+  }
+  for (const input of presetAccumulatorInputs()) {
+    (agent as any).strategies.push(input);
+  }
+  await agent.save();
+  if (agent.active && agent.usdcTrustlineReady !== false) WorkerManager.startAgentWorker(agent);
+
+  const strategies = readAgentStrategies(agent);
+  return ctx.reply(`⚡ Accumulator activated:\n${strategyListText(strategies)}`, { reply_markup: { inline_keyboard: strategyListKeyboard(strategies) } });
+}
+
+// ---------------------------------------------------------------------------
+// Unified callback_query dispatcher
+// ---------------------------------------------------------------------------
+bot.on('callback_query', async (ctx: any) => {
+  const data: string = ctx.callbackQuery?.data ?? '';
+  const { action, arg } = parseCallback(data);
+
+  // Preserve the existing trade-confirm behavior.
+  if (action === 'confirm_buy' || action === 'confirm_sell' || action === 'reject_trade') {
+    return handleTradeConfirmCallback(ctx, action, arg ?? '');
+  }
+
+  await ctx.answerCbQuery().catch(() => {});
+  try {
+    switch (action) {
+      case 'menu': return await handleMenu(ctx, arg);
+      case 'add': return await handleAddType(ctx, arg as StrategyType);
+      case 'dca_int': return await handleDcaInterval(ctx, Number(arg));
+      case 'dca_amt': return await handleDcaAmount(ctx, Number(arg));
+      case 'review': return await handleReview(ctx, arg);
+      case 'strat_toggle': return await handleToggle(ctx, arg ?? '');
+      case 'strat_remove': return await handleRemove(ctx, arg ?? '');
+      case 'preset': return await handlePreset(ctx, arg);
+      default: return;
+    }
+  } catch (e) {
+    console.error('callback dispatch error:', e);
+    try { await ctx.reply('Something went wrong. Try /menu again.'); } catch {}
   }
 });

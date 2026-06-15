@@ -340,11 +340,15 @@ export const popupMessageListener = (
     case SERVICE_TYPES.SIGN_FREIGHTER_TRANSACTION: {
       return signFreighterTransaction({
         request,
+        localStore,
+        sessionStore,
       });
     }
     case SERVICE_TYPES.SIGN_FREIGHTER_SOROBAN_TRANSACTION: {
       return signFreighterTransaction({
         request,
+        localStore,
+        sessionStore,
       });
     }
     case SERVICE_TYPES.SIGN_AUTH_MESSAGE: {

@@ -134,7 +134,7 @@ describe("GET /vault/:asset/state", () => {
 
     const soroPos = positions.find((p) => p.address === SOROSWAP_XLM);
     expect(soroPos).toBeDefined();
-    expect(soroPos!.name).toBe("Soroswap");
+    expect(soroPos!.name).toBe("Soroswap LP");
     expect(soroPos!.sharePercent).toBeCloseTo(33.33, 1);
 
     const totalPct = positions.reduce((sum, p) => sum + p.sharePercent, 0);

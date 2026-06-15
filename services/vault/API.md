@@ -216,6 +216,51 @@ curl -s -X POST http://localhost:8787/vault/xlm/withdraw/build-tx \
 }
 ```
 
+### `POST /swap/build-tx`
+Build (don't sign) a direct Soroswap token-swap transaction. Returns base64 XDR for the wallet to sign and submit via `POST /tx/submit`.
+
+```bash
+curl -s -X POST http://localhost:8787/swap/build-tx \
+  -H 'content-type: application/json' \
+  -d '{
+    "user": "GCWHACNPCEV6FPANBP3WMHFSR3LXMZO5CNIZNEKEKV7PAM2TBJ5HEVTV",
+    "tokenIn": "usdc",
+    "tokenOut": "xlm",
+    "amountIn": "5000000",
+    "maxSlippageBps": 50
+  }' | jq
+```
+
+- `user` — Stellar account public key (`G...`). The simulator runs as this account, so the wallet must hold `amountIn` of `tokenIn` and be able to receive `tokenOut`.
+- `tokenIn` / `tokenOut` — token symbol, must be `"xlm"` or `"usdc"`. The two must differ.
+- `amountIn` — i128 decimal string in base units (7 decimals). `"5000000"` = 0.5 tokens. Must be a positive integer string (no decimals).
+- `maxSlippageBps` — optional, default `50` (= 0.5%). The server simulates `swap_exact_tokens_for_tokens` with `amountOutMin = 0` to read `expectedOut`, then computes `minOut = expectedOut * (10000 - maxSlippageBps) / 10000` and bakes that floor into the XDR. The Soroswap router enforces it on-chain — if liquidity shifts before submission and the actual output falls below `minOut`, the transaction reverts.
+
+> **Token note:** `usdc` resolves to the **Circle USDC** SAC (`CBIELTK6…XQDAMA`) used on the live Soroswap XLM/USDC pair — **not** the Blend-pool USDC SAC. Ensure the user's wallet holds Circle USDC (not Blend USDC) when selling USDC, and that it has a Circle USDC trustline established when buying USDC.
+
+```json
+{
+  "xdr": "AAAAAgAAAACscAmvESvi...",
+  "router": "CCJUD55AG6W5HAI5LRVNKAE5WDP5XGZBUDS5WNTIVDU7O264UZZE7BRD",
+  "preview": {
+    "venue": "soroswap",
+    "tokenIn": "usdc",
+    "tokenOut": "xlm",
+    "amountIn": "5000000",
+    "expectedOut": "38000000",
+    "minOut": "37810000",
+    "maxSlippageBps": 50,
+    "rate": "7.6"
+  }
+}
+```
+
+- `xdr` — unsigned Soroban transaction envelope; pass to `POST /tx/submit` after the wallet signs it.
+- `router` — Soroswap V2 router contract used (matches the `soroswapRouter` in `/addresses`).
+- `preview.expectedOut` — simulated output in base units (i128 decimal string); display-only estimate.
+- `preview.minOut` — the slippage floor baked into the XDR (i128 decimal string). The on-chain swap will revert if it cannot deliver at least this amount.
+- `preview.rate` — `expectedOut / amountIn` as a string; display-only.
+
 ### `POST /tx/submit`
 Submit a signed Soroban transaction. Use this when the wallet can sign but
 not submit (e.g. an embedded signer). The API polls Soroban RPC for up to 30

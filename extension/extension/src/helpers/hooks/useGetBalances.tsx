@@ -16,14 +16,16 @@ import type {
 
 import { RequestState } from "constants/request";
 import { wallet as sharedWallet } from "helpers/stellar";
+import { getTokenPricesDeduped } from "@shared/helpers/tokenPrices";
 import { initialState, reducer } from "helpers/request";
 import { settingsSelector } from "popup/ducks/settings";
 import { AssetType } from "@shared/api/types/account-balance";
 
 export const SOROBAN_TOKENS_STORAGE_KEY = "stellar_soroban_tokens";
 
-// API Key indicator
-const API_KEY = "qomjjag2a9gq95uhlnzhl";
+// Token-price fetching is enabled only when an indexer API key is configured
+// (sourced from API_KEY at build time; see helpers/stellar).
+const API_KEY = process.env.API_KEY || "";
 
 export function getStoredSorobanTokens(
   network: string,
@@ -202,7 +204,7 @@ function useGetBalances(_options: BalancesOptions = {}) {
         let prices = {};
         if (API_KEY && mergedSDKBalances.length > 0 && sharedWallet) {
           try {
-            prices = await sharedWallet.getTokenPrices(mergedSDKBalances);
+            prices = await getTokenPricesDeduped(mergedSDKBalances);
           } catch (e) {
             console.warn("Failed to fetch token prices:", e);
           }

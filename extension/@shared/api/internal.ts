@@ -34,6 +34,7 @@ import {
   wallet,
   xlmToStroop,
 } from "@shared/helpers/stellar";
+import { getTokenPricesDeduped } from "@shared/helpers/tokenPrices";
 
 import {
   buildSorobanServer,
@@ -621,7 +622,7 @@ export const getTokenPrices = async (
   if (publicKey) {
     // Fetch real balances with metadata then pass to getTokenPrices
     const balancesWithMeta = await wallet.getAccountBalancesWithMetadata(publicKey);
-    sdkPrices = await wallet.getTokenPrices(balancesWithMeta);
+    sdkPrices = await getTokenPricesDeduped(balancesWithMeta);
   } else {
     // Fallback: build minimal AccountBalance[] from token ID strings
     const sdkBalances = filteredTokens.map((tokenId) => {
@@ -636,16 +637,20 @@ export const getTokenPrices = async (
         assetIssuer,
       };
     });
-    sdkPrices = await wallet.getTokenPrices(sdkBalances);
+    sdkPrices = await getTokenPricesDeduped(sdkBalances);
   }
 
   // Normalise SDK's numeric prices to Freighter's ApiTokenPrices (currentPrice: string)
   const result: ApiTokenPrices = {};
   for (const [tokenId, data] of Object.entries(sdkPrices)) {
+    // The SDK keys native XLM as "XLM", but consumers of this map treat keys as
+    // canonical asset ids (e.g. getTotalUsd does getAssetFromCanonical(key),
+    // which throws "invalid asset canonical id: XLM"). Normalise to "native".
+    const canonicalKey = tokenId === "XLM" ? "native" : tokenId;
     if (!data) {
-      result[tokenId] = null;
+      result[canonicalKey] = null;
     } else {
-      result[tokenId] = {
+      result[canonicalKey] = {
         currentPrice: String(data.currentPrice),
         percentagePriceChange24h:
           data.percentagePriceChange24h !== null
