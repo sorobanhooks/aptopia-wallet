@@ -1,0 +1,37 @@
+# Self-contained, NON-workspace deployable Ed25519 verifier contract.
+#
+# Empty `[workspace]` table detaches it from the parent workspace (own target
+# dir / lock — no contention with P3). This is NOT a custom crypto verifier:
+# every function delegates to the OpenZeppelin-published, audited
+# `stellar_accounts::verifiers::ed25519` building-block functions
+# (verify / canonicalize_key / batch_canonicalize_key). Per the OZ README
+# (sections 4 & 5), verifiers are deployed by wrapping these library functions
+# as a contract; a single deployed verifier serves any number of (verifier,
+# pubkey) external signers.
+[workspace]
+
+[package]
+name = "sa-ed25519-verifier"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.85"
+license = "MIT"
+description = "Deployable wrapper exposing OZ stellar-accounts Ed25519 verifier building blocks as a contract (M1 tracer, P2)."
+
+[lib]
+crate-type = ["cdylib"]
+doctest = false
+
+[dependencies]
+soroban-sdk = "=25.3.1"
+stellar-accounts = "=0.7.1"
+
+[profile.release]
+opt-level = "z"
+overflow-checks = true
+debug = 0
+strip = "symbols"
+debug-assertions = false
+panic = "abort"
+codegen-units = 1
+lto = true

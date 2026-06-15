@@ -1,0 +1,1 @@
+/Users/darqlabs/Development/github/xyra-vault/.claude/skills/gstack/cso/SKILL.md

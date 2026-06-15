@@ -18,22 +18,15 @@ export type BuyRoute =
   | { kind: 'tier2_confirm'; usdc: string; usdcNum: number }
   | { kind: 'blocked'; reason: string };
 
-/**
- * Planned USDC spend for a buy based on configured amount, then safety-capped.
- */
-export function computePlannedBuyUsdc(
-  agent: {
-    tier1Max: number;
-    tier2Max: number;
-    dailyBudget: number;
-    spentToday: number;
-    buyAmountUsdc: number;
-  },
-  usdcBalance: number
+/** Planned USDC spend for a buy with an explicit requested USDC amount (per-strategy). */
+export function computePlannedBuyUsdcForAmount(
+  agent: { tier2Max: number; dailyBudget: number; spentToday: number },
+  usdcBalance: number,
+  requestedUsdc: number
 ): number {
   const dailyLeft = remainingDailyBudgetUsd(agent);
   const spendable = Math.max(0, usdcBalance - USDC_BALANCE_RESERVE);
-  return Math.min(agent.buyAmountUsdc, agent.tier2Max, dailyLeft, spendable);
+  return Math.min(requestedUsdc, agent.tier2Max, dailyLeft, spendable);
 }
 
 export function routeBuy(
@@ -71,29 +64,24 @@ export type SellRoute =
   | { kind: 'tier2_confirm'; xlm: string }
   | { kind: 'blocked'; reason: string };
 
-export function routeSell(
-  agent: { tier1Max: number; tier2Max: number; sellAmountXlm: number },
+/** Route a sell with an explicit XLM amount (per-strategy). */
+export function routeSellForAmount(
+  agent: { tier1Max: number; tier2Max: number },
+  sellAmountXlm: number,
   currentXlmPriceUsd: number
 ): SellRoute {
   if (agent.tier2Max <= 0 || agent.tier1Max <= 0) {
-    return { kind: 'skip', reason: 'Tier limits not configured; run /setrules' };
+    return { kind: 'skip', reason: 'Tier limits not configured' };
   }
   if (agent.tier1Max >= agent.tier2Max) {
     return { kind: 'skip', reason: 'Invalid rules: tier2 max must exceed tier1 max' };
   }
-
-  if (!Number.isFinite(agent.sellAmountXlm) || agent.sellAmountXlm <= 0) {
-    return { kind: 'skip', reason: 'Sell amount not configured; run /setrules' };
+  if (!Number.isFinite(sellAmountXlm) || sellAmountXlm <= 0) {
+    return { kind: 'skip', reason: 'Sell amount not configured' };
   }
-
-  const notionalUsd = agent.sellAmountXlm * currentXlmPriceUsd;
-  const xlmStr = floorUsdcAmount(agent.sellAmountXlm);
-
-  if (notionalUsd <= agent.tier1Max) {
-    return { kind: 'tier1_auto', xlm: xlmStr };
-  }
-  if (notionalUsd <= agent.tier2Max) {
-    return { kind: 'tier2_confirm', xlm: xlmStr };
-  }
+  const notionalUsd = sellAmountXlm * currentXlmPriceUsd;
+  const xlmStr = floorUsdcAmount(sellAmountXlm);
+  if (notionalUsd <= agent.tier1Max) return { kind: 'tier1_auto', xlm: xlmStr };
+  if (notionalUsd <= agent.tier2Max) return { kind: 'tier2_confirm', xlm: xlmStr };
   return { kind: 'blocked', reason: 'Sell size exceeds tier 2 maximum' };
 }

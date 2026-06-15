@@ -1,0 +1,50 @@
+# Local development for the agent backend (x402-paywall-server).
+#
+#   docker compose up -d            # build (first run) + start with hot reload
+#   docker compose up -d --build    # force rebuild after dependency changes
+#   docker compose down             # stop and remove container
+#
+# Prefer the launcher which falls back to a nohup process when Docker is
+# unavailable:  ./scripts/start-agent-backend.sh
+#
+# Durability: restart=unless-stopped means the container comes back after a
+# Docker daemon or machine restart (matching xyra-mongo and baku-api).
+#
+# Networking: Mongo (xyra-mongo, published on the host) and Redis (host
+# redis-server) are reached from the host as localhost. From inside this
+# container that must be host.docker.internal, so MONGODB_URI / REDIS_URL are
+# overridden below. extra_hosts maps host.docker.internal on Linux engines
+# (it already resolves on Docker Desktop for Mac/Windows).
+
+services:
+  agent-backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: agent-backend:dev
+    container_name: xyra-agent-backend
+    ports:
+      - "3000:3000"
+    env_file:
+      # Secrets, KEK, JWT signing secret, Gemini key, etc. Required.
+      - path: .env
+        required: true
+    environment:
+      # Reach host-published Mongo and host Redis from inside the container.
+      MONGODB_URI: "mongodb://host.docker.internal:27017/xyra-wallet"
+      REDIS_URL: "redis://host.docker.internal:6379"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      # Live source mount — host edits are reflected inside the container and
+      # nodemon restarts the process.
+      - .:/app
+      # Keep the container's linux-native node_modules out of the bind mount.
+      - /app/node_modules
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3000/health"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 20s

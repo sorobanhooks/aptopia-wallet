@@ -1,0 +1,56 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/addresses",
+    "crates/strategy-trait",
+    "crates/mock-strategy",
+    "crates/vault",
+    "crates/blend-strategy",
+    "crates/soroswap-strategy",
+    "crates/defindex-strategy",
+    "crates/allocator-strategy",
+    "crates/sa-tracer",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.85"
+license = "MIT"
+repository = "https://github.com/Blockchain-AI-Apps/baku"
+
+[workspace.dependencies]
+# Pinned to 25.x — stellar-tokens 0.7.1 requires ^25.3.0 and blend-contract-sdk 2.25.0 requires ^25.0.1.
+# Protocol 26 (soroban-sdk 26.0.0) would break both; revisit when OZ + Blend ship 26.x SDKs.
+soroban-sdk = "25.3.1"
+stellar-tokens = "0.7.1"
+# Smart Account / auth-digest types (OZ stellar-contracts). Pinned to same 0.7.x minor as
+# stellar-tokens. Must NOT bump soroban-sdk off 25.3.1 (OZ 0.7.1 line targets soroban-sdk 25.3.0).
+stellar-accounts = "=0.7.1"
+stellar-macros = "0.7.1"
+stellar-contract-utils = "0.7.1"
+blend-contract-sdk = "2.25.0"
+
+# Internal crates
+baku-addresses = { path = "crates/addresses" }
+baku-strategy-trait = { path = "crates/strategy-trait" }
+baku-mock-strategy = { path = "crates/mock-strategy" }
+baku-blend-strategy = { path = "crates/blend-strategy" }
+baku-soroswap-strategy = { path = "crates/soroswap-strategy" }
+baku-defindex-strategy = { path = "crates/defindex-strategy" }
+baku-vault = { path = "crates/vault" }
+baku-allocator-strategy = { path = "crates/allocator-strategy" }
+
+[profile.release]
+opt-level = "z"
+overflow-checks = true
+debug = 0
+strip = "symbols"
+debug-assertions = false
+panic = "abort"
+codegen-units = 1
+lto = true
+
+[profile.release-with-logs]
+inherits = "release"
+debug-assertions = true

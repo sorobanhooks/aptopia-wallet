@@ -1,0 +1,48 @@
+{
+  "name": "docs",
+  "version": "1.0.0",
+  "private": true,
+  "engines": {
+    "node": ">=22.0.0"
+  },
+  "scripts": {
+    "docusaurus": "docusaurus",
+    "start": "docusaurus start",
+    "build": "docusaurus build",
+    "swizzle": "docusaurus swizzle",
+    "deploy": "docusaurus deploy",
+    "serve": "docusaurus serve"
+  },
+  "browserslist": {
+    "production": [
+      ">0.2%",
+      "not dead",
+      "not op_mini all"
+    ],
+    "development": [
+      "last 1 chrome version",
+      "last 1 firefox version",
+      "last 1 safari version"
+    ]
+  },
+  "dependencies": {
+    "@docusaurus/core": "3.6.3",
+    "@docusaurus/preset-classic": "3.6.3",
+    "@stellar/freighter-api": "latest",
+    "clsx": "2.1.1",
+    "react": "19.0.3",
+    "react-dom": "19.0.3",
+    "react-is": "19.0.3",
+    "styled-components": "6.1.14"
+  },
+  "devDependencies": {
+    "@lavamoat/allow-scripts": "3.3.2"
+  },
+  "lavamoat": {
+    "allowScripts": {
+      "@docusaurus/core>@babel/runtime-corejs3>core-js-pure": false,
+      "@docusaurus/core>core-js": false,
+      "@docusaurus/core>file-loader>webpack>watchpack>watchpack-chokidar2>chokidar>fsevents": false
+    }
+  }
+}

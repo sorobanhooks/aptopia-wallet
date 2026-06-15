@@ -1,0 +1,453 @@
+# Baku API — VM Deployment Guide
+
+This document describes how to deploy the Baku API (`vault/api` in the
+`xyra-monorepo`) on a Linux VM behind nginx with TLS, managed by `systemd` or
+Docker.
+
+The API is a Bun + Hono process. It is **stateless** apart from a 3-second
+in-memory cache, holds **no secrets** (all signing happens client-side in the
+wallet), and depends only on an outbound Soroban RPC endpoint.
+
+> **Sections 1–13** are the full greenfield (fresh-VM) guide.
+> **Section 0** (below) is the fast path for **our current scenario**: adding
+> the Baku API to the **VM that already runs the agent backend**. Start there.
+
+---
+
+## 0. Fast path — add Baku API to the existing Xyra VM
+
+We already run the **agent backend** on a VM. The Baku API is fully independent
+of it, so co-hosting is low-risk:
+
+| Concern        | Baku API                          | Agent backend                       |
+| -------------- | --------------------------------- | ----------------------------------- |
+| Port           | **8787**                          | 3000 / 4000                         |
+| Datastore      | none (3 s in-memory cache only)   | MongoDB + Redis                     |
+| Secrets        | **none** (key-less, build-tx only)| KEK, JWT, Gemini, Telegram, x402    |
+| External deps  | Soroban RPC (outbound HTTPS)      | Soroban RPC, Mongo, Redis, x402     |
+
+No shared DB, no shared port, no shared secrets — the two processes don't
+interact. Pick whichever install style the VM already uses.
+
+### 0.1 Get the code onto the VM
+
+The Baku API lives in `vault/api` of the monorepo. Clone the whole monorepo
+(small) and work inside that folder:
+
+```bash
+git clone https://github.com/Blockchain-AI-Apps/xyra-monorepo.git
+cd xyra-monorepo/vault/api
+```
+
+For a private repo, `gh auth login` (or a deploy key) first. To refresh later:
+`git -C ~/xyra-monorepo pull`.
+
+### 0.2 Option A — Docker (if the VM already runs the agent in Docker)
+
+The repo ships `vault/api/docker-compose.yml`. It builds the image, binds
+`:8787`, and self-restarts. From `vault/api`:
+
+```bash
+# testnet defaults are baked into the compose `environment:` block.
+docker compose up -d --build
+docker compose logs -f          # watch
+curl http://127.0.0.1:8787/health   # {"ok":true,...}
+```
+
+The compose file's container is named `baku-api` and uses
+`restart: unless-stopped`. It runs `bun --watch` (hot reload) — fine for a demo
+host. For a stricter production image, swap the `CMD` to `bun run src/index.ts`
+(no watch) or use the standalone `docker run` in §13.
+
+To override network/RPC, create `vault/api/.env` (see §5) — compose reads it.
+
+### 0.3 Option B — systemd + Bun (no Docker)
+
+Follow the greenfield flow but with monorepo paths. Condensed:
+
+```bash
+# Bun (once, as the service user)
+curl -fsSL https://bun.sh/install | bash
+
+# Code
+cd ~/xyra-monorepo/vault/api
+~/.bun/bin/bun install --production
+
+# Run via systemd — see §6, but set:
+#   WorkingDirectory=/home/<user>/xyra-monorepo/vault/api
+#   ExecStart=/home/<user>/.bun/bin/bun run src/index.ts
+```
+
+### 0.4 Expose it (nginx)
+
+The VM likely already has nginx fronting the agent backend. Add **one more
+server block** (a dedicated subdomain is cleanest, e.g. `baku.<domain>` or
+`vault-api.<domain>`) pointing at `127.0.0.1:8787`. Use the block in §7 and the
+TLS step in §8 verbatim — just change `server_name` and `proxy_pass` port.
+
+If you prefer a single host, route by path instead (note: the API serves from
+`/`, so a path prefix needs a rewrite):
+
+```nginx
+location /baku/ {
+    proxy_pass http://127.0.0.1:8787/;   # trailing slash strips /baku
+    proxy_set_header Host $host;
+    proxy_set_header X-Forwarded-Proto $scheme;
+}
+```
+
+A subdomain avoids the rewrite and matches how the extension expects a clean
+base URL — recommended.
+
+### 0.5 Verify + wire the extension
+
+```bash
+curl https://baku.<domain>/health
+curl https://baku.<domain>/addresses
+curl https://baku.<domain>/vault/xlm/state
+```
+
+Then set the extension's `BAKU_API_URL` (in `extension/extension/.env`) to
+`https://baku.<domain>` and rebuild (`cd extension && yarn build`).
+
+CORS is already enabled app-side (`src/index.ts` → `app.use("*", cors())`), so
+the extension popup and dashboards can call it cross-origin out of the box.
+Tighten the allow-list before any public/mainnet use (see §10).
+
+---
+
+## 1. Architecture at a glance
+
+```
+ wallet (Xyra extension)
+        │  HTTPS
+        ▼
+   ┌─────────┐      ┌──────────────┐      ┌──────────────────┐
+   │  nginx  │ ───▶ │  Baku API    │ ───▶ │  Soroban RPC      │
+   │  :443   │      │  bun :8787   │      │  (testnet/mainnet)│
+   └─────────┘      └──────────────┘      └──────────────────┘
+```
+
+- **Single process**, restarted by `systemd` on crash.
+- **No database**, no queue, no Redis.
+- **No private keys** on the server. The API only builds and simulates
+  transactions; clients sign and submit.
+
+---
+
+## 2. VM requirements
+
+| Resource | Minimum                                     |
+| -------- | ------------------------------------------- |
+| OS       | Ubuntu 22.04 LTS or 24.04 LTS (Debian works)|
+| vCPU     | 1                                           |
+| RAM      | 1 GB                                        |
+| Disk     | 10 GB                                       |
+| Network  | Outbound HTTPS to Soroban RPC; inbound 22 (SSH), 80, 443 |
+| DNS      | An A/AAAA record pointing to the VM (e.g. `api.example.com`) |
+
+Software installed during setup: `curl`, `unzip`, `git`, `nginx`, `certbot`,
+`ufw`, **Bun** (latest).
+
+---
+
+## 3. One-time VM bootstrap
+
+SSH in as a sudo-capable user, then run:
+
+```bash
+# Packages
+sudo apt update && sudo apt -y upgrade
+sudo apt -y install curl unzip git nginx ufw
+
+# Firewall
+sudo ufw allow OpenSSH
+sudo ufw allow 'Nginx Full'
+sudo ufw --force enable
+
+# Dedicated unprivileged service user
+sudo useradd -m -s /bin/bash baku
+
+# Install Bun as that user
+sudo -iu baku bash -c 'curl -fsSL https://bun.sh/install | bash'
+# Bun binary lands at /home/baku/.bun/bin/bun
+```
+
+---
+
+## 4. Fetch the code
+
+As the `baku` user:
+
+```bash
+sudo -iu baku
+git clone https://github.com/Blockchain-AI-Apps/xyra-monorepo.git
+cd xyra-monorepo/vault/api
+~/.bun/bin/bun install --production
+```
+
+For a private repo, use a deploy key or `gh auth login` before cloning.
+
+---
+
+## 5. Environment configuration
+
+Create `~/xyra-monorepo/vault/api/.env`:
+
+```bash
+# Port the Bun server listens on (loopback only; nginx fronts it)
+PORT=8787
+
+# Network selection: testnet | mainnet
+NETWORK=testnet
+
+# Soroban RPC endpoint.
+#   testnet default: https://soroban-testnet.stellar.org
+#   mainnet:         use your provider's mainnet RPC URL
+SOROBAN_RPC_URL=https://soroban-testnet.stellar.org
+
+# Optional: explicit network passphrase. Defaults to Networks.TESTNET.
+# Set this for mainnet:
+#   NETWORK_PASSPHRASE=Public Global Stellar Network ; September 2015
+# NETWORK_PASSPHRASE=Test SDF Network ; September 2015
+
+# Funded G-address used only as a simulate-only "source" for read calls.
+# Does NOT sign. Any funded account works.
+ADMIN_ADDR=GCWHACNPCEV6FPANBP3WMHFSR3LXMZO5CNIZNEKEKV7PAM2TBJ5HEVTV
+```
+
+Lock it down:
+
+```bash
+chmod 600 ~/xyra-monorepo/vault/api/.env
+```
+
+### Environment variables reference
+
+| Variable             | Required | Default                                 | Notes                                                       |
+| -------------------- | -------- | --------------------------------------- | ----------------------------------------------------------- |
+| `PORT`               | no       | `8787`                                  | Bind port                                                   |
+| `NETWORK`            | no       | `testnet`                               | Used by route handlers to select address book                |
+| `SOROBAN_RPC_URL`    | no       | `https://soroban-testnet.stellar.org`   | Override per environment                                    |
+| `NETWORK_PASSPHRASE` | no       | `Networks.TESTNET` from `stellar-sdk`   | Required override for mainnet                               |
+| `ADMIN_ADDR`         | no       | hardcoded testnet funded account        | Must be funded on the target network                        |
+
+---
+
+## 6. systemd unit
+
+Create `/etc/systemd/system/baku-api.service` as root:
+
+```ini
+[Unit]
+Description=Baku API (Bun + Hono)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=baku
+Group=baku
+WorkingDirectory=/home/baku/xyra-monorepo/vault/api
+EnvironmentFile=/home/baku/xyra-monorepo/vault/api/.env
+ExecStart=/home/baku/.bun/bin/bun run src/index.ts
+Restart=always
+RestartSec=3
+StandardOutput=journal
+StandardError=journal
+
+# Hardening
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/home/baku/xyra-monorepo/vault/api
+
+[Install]
+WantedBy=multi-user.target
+```
+
+Enable and start:
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable --now baku-api
+sudo systemctl status baku-api
+```
+
+Smoke test from the VM itself:
+
+```bash
+curl http://127.0.0.1:8787/health
+# {"ok":true,"t":"..."}
+```
+
+Logs:
+
+```bash
+journalctl -u baku-api -f
+```
+
+---
+
+## 7. nginx reverse proxy
+
+Create `/etc/nginx/sites-available/baku-api`:
+
+```nginx
+server {
+    listen 80;
+    server_name api.example.com;
+
+    location / {
+        proxy_pass         http://127.0.0.1:8787;
+        proxy_http_version 1.1;
+        proxy_set_header   Host              $host;
+        proxy_set_header   X-Real-IP         $remote_addr;
+        proxy_set_header   X-Forwarded-For   $proxy_add_x_forwarded_for;
+        proxy_set_header   X-Forwarded-Proto $scheme;
+        proxy_read_timeout 30s;
+    }
+}
+```
+
+Enable it:
+
+```bash
+sudo ln -s /etc/nginx/sites-available/baku-api /etc/nginx/sites-enabled/
+sudo nginx -t
+sudo systemctl reload nginx
+```
+
+---
+
+## 8. TLS with Let's Encrypt
+
+```bash
+sudo apt -y install certbot python3-certbot-nginx
+sudo certbot --nginx -d api.example.com
+```
+
+`certbot` rewrites the nginx config to listen on 443 and installs a renewal
+timer. Verify:
+
+```bash
+sudo systemctl list-timers | grep certbot
+```
+
+---
+
+## 9. End-to-end verification
+
+From any machine:
+
+```bash
+curl https://api.example.com/health
+curl https://api.example.com/addresses
+curl https://api.example.com/vault/xlm/state
+```
+
+Expected:
+
+- `/health` → `{"ok": true, ...}`
+- `/addresses` → JSON map of deployed contract addresses for the configured
+  network.
+- `/vault/xlm/state` → vault state (total assets, price per share, APY, active
+  strategy address).
+
+Then point the Xyra wallet extension's `BAKU_API_URL` at
+`https://api.example.com` (or your `baku.<domain>`) and exercise a deposit
+end-to-end.
+
+---
+
+## 10. CORS
+
+`hono/cors` **is enabled** in `src/index.ts` with a permissive default
+(`app.use("*", cors())`) — fine for testnet/demo. For production, tighten the
+origin allow-list:
+
+**Option A — at the app layer** (preferred). Edit `src/index.ts`:
+
+```ts
+import { cors } from "hono/cors";
+app.use("*", cors({ origin: ["chrome-extension://<id>", "https://app.example.com"] }));
+```
+
+**Option B — at nginx**:
+
+```nginx
+add_header Access-Control-Allow-Origin  "https://app.example.com" always;
+add_header Access-Control-Allow-Methods "GET, POST, OPTIONS"      always;
+add_header Access-Control-Allow-Headers "Content-Type"            always;
+if ($request_method = OPTIONS) { return 204; }
+```
+
+---
+
+## 11. Updating the deployment
+
+```bash
+sudo -iu baku
+cd ~/xyra-monorepo && git pull
+cd vault/api && ~/.bun/bin/bun install --production
+exit
+sudo systemctl restart baku-api
+journalctl -u baku-api -n 50 --no-pager
+```
+
+Rollback is `git checkout <prev-sha> && bun install --production && systemctl
+restart baku-api`. (Docker path: `git pull && docker compose up -d --build`.)
+
+---
+
+## 12. Operational notes
+
+- **Scaling:** the process is CPU-light and stateless. Run multiple replicas
+  behind nginx `upstream` if you need horizontal scale; each replica keeps its
+  own 3 s cache, which is fine.
+- **Rate limiting:** none built in. The upstream Soroban RPC enforces its own
+  limits. If you need protection, add nginx `limit_req` or put Cloudflare in
+  front.
+- **Monitoring:** `journalctl -u baku-api` for logs. For metrics, scrape
+  `/health` from your uptime check. There are no Prometheus endpoints yet.
+- **Mainnet checklist:**
+  1. `NETWORK=mainnet`
+  2. `SOROBAN_RPC_URL=<mainnet RPC>`
+  3. `NETWORK_PASSPHRASE=Public Global Stellar Network ; September 2015`
+  4. `ADMIN_ADDR=<a funded mainnet G-address>`
+  5. Confirm `api/src/addresses.ts` carries the mainnet contract addresses.
+
+---
+
+## 13. Alternatives
+
+### Docker
+
+Minimal `Dockerfile` (not yet in repo):
+
+```dockerfile
+FROM oven/bun:1
+WORKDIR /app
+COPY package.json bun.lock ./
+RUN bun install --production
+COPY . .
+EXPOSE 8787
+CMD ["bun", "run", "src/index.ts"]
+```
+
+Run:
+
+```bash
+docker build -t baku-api ./api
+docker run -d --name baku-api --restart=always \
+  --env-file ./api/.env -p 127.0.0.1:8787:8787 baku-api
+```
+
+Front with the same nginx config from §7.
+
+### Managed platforms
+
+Bun is supported out of the box by Fly.io, Railway, and Render. Each replaces
+sections 3, 6, 7, 8 with a platform-managed equivalent; the `.env` contents
+from §5 remain the same.

@@ -1,0 +1,121 @@
+name: Production Deployment
+env:
+  INDEXER_URL: ${{ secrets.INDEXER_URL }}
+  INDEXER_V2_URL: ${{ secrets.INDEXER_V2_URL }}
+  API_KEY: ${{ secrets.API_KEY }}
+  HUSKY: 0
+on:
+  workflow_dispatch:
+jobs:
+  bump-version:
+    name: Bump Package Version and Submit Extension
+    runs-on: ubuntu-latest
+    steps:
+      - if: ${{ env.INDEXER_URL == '' }}
+        run: |
+          echo "Missing INDEXER_URL"
+          gh run cancel ${{ github.run_id }}
+          gh run watch ${{ github.run_id }}
+      - if: ${{ env.INDEXER_V2_URL == '' }}
+        run: |
+          echo "Missing INDEXER_V2_URL"
+          gh run cancel ${{ github.run_id }}
+          gh run watch ${{ github.run_id }}
+      - name: Checkout code
+        uses: actions/checkout@v6
+      - name: Get version from package.json
+        id: package_version
+        run: |
+          VERSION=$(grep -o '"version": "[^"]*"' extension/package.json | head -1 | sed 's/"version": "\(.*\)"/\1/')
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "Version from package.json: $VERSION"
+      - name: Enable Corepack
+        run: corepack enable
+      - name: Build extension
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+      - run: >
+          yarn && yarn build:freighter-api && yarn build:extension:production
+          --env AMPLITUDE_KEY="${{ secrets.AMPLITUDE_KEY }}"
+          SENTRY_KEY="${{ secrets.SENTRY_KEY }}"
+          BUILD_TYPE="production"
+      - name: Install zip
+        uses: montudor/action-zip@0852c26906e00f8a315c704958823928d8018b28 #v1.0.0
+      - name: Create git tag
+        run: git tag ${{ steps.package_version.outputs.version }}
+      - name: Create GitHub Release
+        id: create_release
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        with:
+          tag_name: ${{ steps.package_version.outputs.version }}
+          release_name: ${{ steps.package_version.outputs.version }}
+          body: ${{ steps.package_version.outputs.version }}
+          draft: false
+          prerelease: false
+      - name: Build for Firefox
+        id: web-ext-build
+        uses: kewisch/action-web-ext@fe10addf5d5e5ba6b78ffde720dd488a27d10e8c #v1
+        with:
+          cmd: build
+          source: ./extension/build
+      - name: Submit extension to Firefox
+        uses: kewisch/action-web-ext@fe10addf5d5e5ba6b78ffde720dd488a27d10e8c #v1
+        with:
+          cmd: sign
+          source: ${{ steps.web-ext-build.outputs.target }}
+          channel: listed
+          apiKey: ${{ secrets.AMO_SIGN_KEY }}
+          apiSecret: ${{ secrets.AMO_SIGN_SECRET }}
+          timeout: 900000
+      - name: Remove scripts tag
+        uses: restackio/update-json-file-action@f8ef1561cb15ba86a6367b547216375bc60e7f91 #v2.1
+        with:
+          file: ./extension/build/manifest.json
+          fields: '{"background": {"service_worker": "background.min.js"}}'
+      - name: Zip Chrome build
+        run: zip -qq -r ./build_chrome.zip *
+        working-directory: ./extension/build
+      - name: Submit extension to Chrome
+        uses: mnao305/chrome-extension-upload@4008e29e13c144d0f6725462cbd49b7c291b4928 #v5.0.0
+        with:
+          file-path: ./extension/build/build_chrome.zip
+          extension-id: "bcacfldlkkdogcmkkibnjlakofdplcbk"
+          client-id: ${{ secrets.EXTENSION_CLIENT_ID }}
+          client-secret: ${{ secrets.EXTENSION_CLIENT_SECRET }}
+          refresh-token: ${{ secrets.EXTENSION_REFRESH_TOKEN }}
+      # - name: Submit extension to Edge
+      #   uses: wdzeng/edge-addon@v1
+      #   with:
+      #     product-id: ${{ secrets.EDGE_PRODUCT_ID }}
+      #     zip-path: ${{ secrets.EDGE_ZIP_PATH }}
+      #     client-id: ${{ secrets.EDGE_CLIENT_ID }}
+      #     client-secret: ${{ secrets.EDGE_CLIENT_SECRET }}
+      #     access-token-url: ${{ secrets.EDGE_ACCESS_TOKEN_URL }}
+      - name: Upload Release Asset
+        id: upload-release-asset
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: ./extension/build/build_chrome.zip
+          asset_name: build-${{ steps.package_version.outputs.version }}.zip
+          asset_content_type: application/zip
+      - name: Slack Notification
+        uses: rtCamp/action-slack-notify@e31e87e03dd19038e411e38ae27cbad084a90661 #v2.3.3
+        env:
+          MSG_MINIMAL: true
+          SLACK_CHANNEL: release
+          SLACK_COLOR: "#391EDA"
+          SLACK_ICON: https://github.com/stellar/freighter/blob/master/docs/static/images/logo.png?size=48
+          SLACK_MESSAGE:
+            "https://github.com/stellar/freighter/releases/tag/${{
+            steps.package_version.outputs.version }}"
+          SLACK_TITLE:
+            Freighter v${{ steps.package_version.outputs.version }} has been
+            submitted to app stores for review!
+          SLACK_USERNAME: Freighter Administrative Assistant
+          SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK }}

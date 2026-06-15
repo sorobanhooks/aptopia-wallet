@@ -1,0 +1,78 @@
+.AICopilot {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 24rem;
+
+  &__thread {
+    flex: 1;
+    overflow-y: auto;
+    padding: 0.75rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+  }
+
+  &__empty {
+    opacity: 0.6;
+    font-size: 0.85rem;
+    text-align: center;
+    margin-top: 2rem;
+  }
+
+  &__bubble {
+    max-width: 85%;
+    padding: 0.5rem 0.75rem;
+    border-radius: 0.75rem;
+    font-size: 0.85rem;
+
+    &--user {
+      align-self: flex-end;
+      background: var(--color-primary, #7b61ff);
+      color: #fff;
+    }
+    &--copilot {
+      align-self: flex-start;
+      background: var(--color-background-secondary, #1c1f29);
+    }
+  }
+
+  &__card {
+    align-self: flex-start;
+    width: 100%;
+    border: 1px solid var(--color-border-primary, #2a2e39);
+    border-radius: 0.75rem;
+    padding: 0.75rem;
+  }
+  &__card-row {
+    display: flex;
+    justify-content: space-between;
+    font-weight: 600;
+  }
+  &__card-meta {
+    margin-top: 0.4rem;
+    font-size: 0.75rem;
+    opacity: 0.7;
+  }
+  &__card-actions {
+    display: flex;
+    gap: 0.5rem;
+    margin-top: 0.6rem;
+  }
+  &__card-status {
+    margin-top: 0.6rem;
+    font-size: 0.8rem;
+  }
+  &__tx-link {
+    color: var(--color-primary, #7b61ff);
+    text-decoration: underline;
+    white-space: nowrap;
+  }
+
+  &__composer {
+    display: flex;
+    gap: 0.5rem;
+    padding: 0.5rem;
+    border-top: 1px solid var(--color-border-primary, #2a2e39);
+  }
+}

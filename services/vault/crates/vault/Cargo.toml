@@ -1,0 +1,21 @@
+[package]
+name = "baku-vault"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Baku vault contract. SEP-41 share token via OZ Base + custom strategy-delegating ERC-4626 share math with virtual-offset inflation-attack mitigation."
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+soroban-sdk = { workspace = true }
+stellar-tokens = { workspace = true }
+stellar-macros = { workspace = true }
+baku-strategy-trait = { workspace = true }
+
+[dev-dependencies]
+soroban-sdk = { workspace = true, features = ["testutils"] }
+baku-mock-strategy = { workspace = true }

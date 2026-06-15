@@ -11,7 +11,7 @@ export async function fetchPrice(agentSecret: string): Promise<any> {
   const signer = createEd25519Signer(agentSecret, network);
   const client = new x402Client().register(
     'stellar:*',
-    new ExactStellarScheme(signer)
+    new ExactStellarScheme(signer , {url: process.env.STELLAR_MAINNET_RPC})
   );
   const httpClient = new x402HTTPClient(client);
 

@@ -1,0 +1,238 @@
+$loader-dark-color: #191b22;
+$loader-light-color: #444961;
+
+.AccountAssets {
+  &__asset {
+    align-items: center;
+    display: flex;
+    justify-content: space-between;
+    color: var(--sds-clr-gray-12);
+    font-size: 1rem;
+    line-height: 1.5rem;
+
+    &--has-detail {
+      cursor: pointer;
+    }
+
+    &--logo {
+      margin-right: 1rem;
+      max-width: 2rem;
+      max-height: 2rem;
+      position: relative;
+
+      img {
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+        border-radius: 50%;
+      }
+    }
+
+    &--lp-share,
+    &--soroban-token {
+      border: 1px solid var(--sds-clr-gray-06);
+      height: 32px;
+      width: 32px;
+      border-radius: 2rem;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 0.875rem;
+      font-weight: var(--font-weight-semi-bold);
+      line-height: 1.5rem;
+      color: var(--sds-clr-gray-12);
+    }
+
+    &--soroban-token {
+      border: none;
+
+      svg {
+        margin: 0 !important;
+        height: auto !important;
+        width: auto !important;
+      }
+    }
+
+    &--error {
+      width: 32px;
+      height: 32px;
+      align-items: center;
+      background: rgba(100, 50, 241, 0.32);
+      border-radius: 2rem;
+      display: flex;
+      justify-content: center;
+
+      img {
+        height: 1rem;
+        width: 1rem;
+      }
+
+      .ScamAssetIcon img {
+        height: 100%;
+        width: 100%;
+      }
+    }
+
+    &--loading {
+      width: 32px;
+      height: 32px;
+      background: linear-gradient(
+        to right,
+        $loader-dark-color 1%,
+        $loader-light-color 25%,
+        $loader-dark-color 50%
+      );
+      background-size: 18.75rem;
+      animation: loadingAnimation 1.5s linear 0s infinite normal forwards;
+      border-radius: 2rem;
+
+      img {
+        width: 0;
+        height: 0;
+      }
+    }
+
+    &--no-margin,
+    &--modal {
+      margin: 0;
+    }
+  }
+
+  @keyframes loadingAnimation {
+    0% {
+      background-position: -9.375rem 0;
+    }
+    100% {
+      background-position: 9.375rem 0;
+    }
+  }
+
+  &__copy-left {
+    min-width: 0;
+    display: flex;
+    font-weight: var(--font-weight-medium);
+
+    .asset-icon {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+    }
+
+    .asset-native-value {
+      display: flex;
+      flex-direction: column;
+    }
+
+    .asset-code {
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      min-width: 0;
+    }
+
+    .asset-native-amount {
+      font-size: var(--sds-fs-secondary);
+      color: var(--sds-clr-gray-11);
+    }
+  }
+
+  &__copy-right {
+    min-width: 0;
+    font-weight: var(--font-weight-regular);
+
+    .asset-usd-amount {
+      text-align: right;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      min-width: 0;
+    }
+
+    .asset-value-delta {
+      text-align: right;
+      float: right;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      min-width: 0;
+      font-size: var(--sds-fs-secondary);
+
+      &.positive {
+        color: var(--sds-clr-green-09);
+      }
+
+      &.negative {
+        color: var(--sds-clr-gray-11);
+      }
+    }
+  }
+
+  &__asset-detail__wrapper {
+    background: var(--sds-clr-gray-01);
+    height: 100%;
+    width: 100%;
+  }
+
+  // Right-side cluster: price/USD value + the optional accordion chevron.
+  // Kept on its own row so the chevron lines up cleanly with the existing
+  // copy-right content rather than wrapping below it on narrow popups.
+  &__right-cluster {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    min-width: 0;
+  }
+
+  &__chevron {
+    align-items: center;
+    background: transparent;
+    border: none;
+    border-radius: 0.375rem;
+    color: var(--sds-clr-gray-10);
+    cursor: pointer;
+    display: flex;
+    height: 1.5rem;
+    justify-content: center;
+    padding: 0;
+    width: 1.5rem;
+
+    &:hover {
+      background: var(--sds-clr-gray-04);
+      color: var(--sds-clr-gray-12);
+    }
+
+    svg {
+      width: 1rem;
+      height: 1rem;
+    }
+  }
+
+  // Accordion split rendered below an aggregated row. Indented under the
+  // asset icon column so visually it reads as a child of the parent row.
+  &__split {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+    padding: 0.25rem 0 0.75rem 3rem; // 2rem icon + 1rem icon-margin
+    color: var(--sds-clr-gray-11);
+    font-size: var(--sds-fs-secondary);
+    line-height: 1.25rem;
+
+    &__row {
+      display: flex;
+      justify-content: space-between;
+      gap: 0.5rem;
+    }
+
+    &__label {
+      color: var(--sds-clr-gray-10);
+    }
+
+    &__value {
+      color: var(--sds-clr-gray-12);
+      font-weight: var(--font-weight-medium);
+      text-align: right;
+      white-space: nowrap;
+    }
+  }
+}

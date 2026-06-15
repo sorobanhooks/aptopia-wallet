@@ -1,0 +1,15 @@
+{
+  "extends": "../tsconfig.json",
+  "compilerOptions": {
+    "baseUrl": "src/",
+    "types": [
+      "@types/chrome",
+      "@types/jest",
+      "node",
+      "jest",
+      "@testing-library/jest-dom"
+    ]
+  },
+  "include": ["src", "public"],
+  "exclude": ["build"]
+}

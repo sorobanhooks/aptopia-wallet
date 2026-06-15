@@ -1,0 +1,21 @@
+[package]
+name = "sa-tracer"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Shape-validating tracer for OZ stellar-accounts (Smart Account) auth-digest assumptions (D1). Fail-loud, no contract logic."
+
+[lib]
+crate-type = ["rlib"]
+doctest = false
+
+[dependencies]
+soroban-sdk = { workspace = true }
+stellar-accounts = { workspace = true }
+
+[dev-dependencies]
+# Enable testutils for Address::generate and the test Env in the oz_api_shape
+# tracer. Same soroban-sdk version as the workspace pin (25.3.1) — no skew.
+soroban-sdk = { workspace = true, features = ["testutils"] }

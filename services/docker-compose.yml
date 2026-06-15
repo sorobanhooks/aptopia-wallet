@@ -1,0 +1,16 @@
+# Xyra monorepo — run both backends from the repo root.
+#
+#   docker compose up -d          # Baku API :8787 + agent backend :3000
+#   docker compose up -d --build  # force rebuild after dependency changes
+#   docker compose down
+#
+# Uses Compose `include:` (v2.20+) so each service's own compose file stays
+# authoritative; relative paths inside them resolve against their own folder.
+#
+# External prerequisites (not managed here):
+#   - xyra-mongo container publishing 27017   (docker start xyra-mongo)
+#   - host redis-server on 6379
+
+include:
+  - path: vault/api/docker-compose.yml
+  - path: agent/docker-compose.yml

@@ -1,0 +1,14 @@
+[package]
+name = "baku-strategy-trait"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Strategy adapter trait + typed StrategyClient + StrategyError for Baku vaults."
+
+[lib]
+crate-type = ["rlib"]
+
+[dependencies]
+soroban-sdk = { workspace = true }
