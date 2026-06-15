@@ -1,29 +1,214 @@
-# Freighter
+# Aptopia
 
-Freighter is a non-custodial wallet extension that enables you to sign Stellar
-transactions via your browser. Learn more at
-[freighter.app](https://www.freighter.app/).
+Aptopia is a **non-custodial smart wallet on the Stellar testnet**, built as a
+fork of [Freighter](https://www.freighter.app/) and extended into a full DeFi
+ecosystem: one-click yield vaults (`bkuXLM` / `bkuUSDC` receipt tokens), an
+autonomous price-triggered trading agent with two-tier human confirmation, x402
+pay-per-call data, an AI copilot, and an OpenZeppelin Smart Account that
+cryptographically fences the agent's on-chain power.
 
-## Yarn Workspaces
+The repo root is the Freighter-fork **browser-extension wallet**; the extra
+backend services that power the extended ecosystem live under
+[`services/`](services/).
 
-This repo is constructed using yarn workspaces and consists of the 4 sections:
+> Mainnet is gated on audit + funding — **this codebase targets Stellar testnet only.**
 
-- the browser extension (`/extension`)
-- the client-facing SDK (`/@stellar/freighter-api`)
-- the docs (`/docs`)
-- some shared files that the above use (`/@shared/*`)
+---
 
-## Prerequisites
+## Repository layout
 
-You will need
+| Folder | What it is | Stack / port |
+|--------|------------|--------------|
+| **(repo root)** | The Freighter-fork wallet — a yarn-workspaces monorepo | React 19, Manifest V3 |
+| [`extension/`](extension/) | The wallet workspace; buildable package at [`extension/extension/`](extension/extension/) | webpack build → `extension/extension/build` |
+| [`@stellar/freighter-api/`](@stellar/freighter-api/) | Client-facing SDK published as `@stellar/freighter-api` | TypeScript npm module |
+| [`@shared/`](@shared/) | Shared `api` / `constants` / `helpers` used across workspaces | TypeScript |
+| [`docs/`](docs/) | The wallet docs site | Docusaurus on `:3000` |
+| [`services/vault/`](services/vault/) | Soroban smart contracts **+** the Vault API | Rust contracts + Bun/Hono API on `:8787` |
+| [`services/agent/`](services/agent/) | Autonomous trading-agent backend | Express + MongoDB + Redis on `:3000` |
+| [`services/docs/`](services/docs/) | Cross-cutting workspace specs & plans | — |
 
-- Node (>=21): https://nodejs.org/en/download/
-- Yarn (v1.22.5 or newer): https://classic.yarnpkg.com/en/docs/install
+### Repo root — the wallet (Freighter fork)
 
-## Build the extension
+A fork of Freighter (Manifest V3, React 19) structured as yarn workspaces. The
+buildable extension package lives at
+[`extension/extension/`](extension/extension/), with source under
+[`extension/extension/src/`](extension/extension/src/) (`background/` worker,
+`popup/` UI, `contentScript/`, `api/`). The **user's key never leaves the
+extension's background worker.**
 
-To simply build a production version of the extension, install the prerequisites
-then navigate to this root folder (`/freighter`) in your command line and run
+### `services/vault/` — contracts + Vault API
+
+The on-chain layer and the stateless API that fronts it.
+
+- **`services/vault/crates/`** — the Soroban (Rust) contracts:
+  - `vault` — the core deposit/redeem vault that mints receipt tokens
+  - `allocator-strategy` — weighted meta-allocator splitting funds across strategies
+  - `blend-strategy`, `defindex-strategy`, `soroswap-strategy`, `mock-strategy` — individual yield strategy adapters
+  - `strategy-trait` — the shared strategy interface
+  - `sa-account`, `sa-tracer` — the OpenZeppelin Smart Account and its tracer
+  - `addresses` — the canonical Rust copy of deployed contract IDs
+- **`services/vault/api/`** — the **Vault API** (Bun + Hono, port `:8787`).
+  Stateless and **key-less**: it only reads chain state, builds transactions,
+  and relays signed ones. Source in
+  [`services/vault/api/src/`](services/vault/api/src/) (`routes/`, `rpc.ts`,
+  `auth-digest.ts`, `cache.ts`, `addresses.ts`).
+- **`services/vault/scripts/`** — deploy / wiring shell scripts and the
+  `deployed.testnet.env` record of live contract IDs.
+- **`services/vault/docs/`** — architecture docs (see below).
+- **`services/vault/API.md`** — Vault API endpoint reference.
+
+### `services/agent/` — trading-agent backend
+
+Express server (port `:3000`, MongoDB + Redis) that runs the autonomous,
+price-triggered trading agent with two-tier human confirmation, the AI copilot,
+x402 pay-per-call data, and the Telegram bot surface. Source in
+[`services/agent/src/`](services/agent/src/):
+
+- `routes/` — HTTP API (`v1.ts`, `alerts.ts`, `enriched.ts`, `insight.ts`, `strategy-validation.ts`)
+- `services/` — the engine internals: `strategy-engine.ts`, `trade-routing.ts`,
+  `worker-manager.ts`, `pending-tier2.ts` (Tier-2 confirmations),
+  `agent-secret-crypto.ts` (envelope-encrypted agent key), `bot.ts` /
+  `telegram-menu.ts` (Telegram), `x402-client.ts`, and the `*-ai.ts` Gemini-backed
+  insight/copilot helpers.
+
+### Architecture docs
+
+Start here before doing architecture work:
+
+1. [`services/vault/docs/SYSTEM_ARCHITECTURE_DETAILED.md`](services/vault/docs/SYSTEM_ARCHITECTURE_DETAILED.md) — full Mermaid diagrams of every flow
+2. [`services/vault/docs/ARCHITECTURE_OVERVIEW.md`](services/vault/docs/ARCHITECTURE_OVERVIEW.md) — high-level shape and trust boundaries
+3. [`services/vault/docs/SCF_TECHNICAL_INTEGRATION.md`](services/vault/docs/SCF_TECHNICAL_INTEGRATION.md) — API contracts, SIWE/SEP-53 auth, Smart Account security proof
+4. [`services/vault/API.md`](services/vault/API.md) — Vault API reference
+
+---
+
+## Running everything
+
+### Prerequisites
+
+- Docker Desktop running
+- A MongoDB container publishing `27017` (`docker start aptopia-mongo`)
+- Redis reachable on `6379`
+- For the extension: Node ≥ 22 + Yarn
+
+### Both backends (Vault API + agent backend)
+
+The compose file lives in [`services/`](services/) and uses Compose `include:`
+so each service's own compose file stays authoritative. Run it from `services/`:
+
+```bash
+cd services
+docker compose up -d          # Vault API :8787 + agent backend :3000
+docker compose up -d --build  # force rebuild after dependency changes
+docker compose logs -f        # watch
+docker compose down           # stop
+```
+
+### Browser extension
+
+Build from the `extension/` workspace and load the output as an unpacked
+extension in Chrome:
+
+```bash
+cd extension && yarn && yarn build
+# Load extension/extension/build as an unpacked extension in Chrome.
+```
+
+### Demo & Download
+
+### 🎥 Demo Video
+Watch Aptopia in action:
+
+https://youtu.be/eSo_nP8tlH8
+
+### 📦 Download Wallet
+Download the latest Aptopia wallet build:
+
+https://drive.google.com/file/d/174leIg3TWIxe4n-kPBn9hKN7DDnDTijD/view?usp=sharing
+
+### Contracts (Rust / Soroban)
+
+```bash
+cd services/vault
+cargo test                                    # unit tests
+cargo build --release --target wasm32v1-none  # wasm build
+```
+
+### API tests & Smart-Account parity gate
+
+```bash
+cd services/vault/api
+bun run test                  # API tests (uses --isolate)
+bun run tracer:digest-parity  # Smart Account digest parity gate (Rust ≡ TS)
+```
+
+### Agent backend (standalone)
+
+```bash
+cd services/agent
+npm install
+npm run dev        # nodemon + ts-node
+npm test           # node:test + jest suites
+```
+
+---
+
+## Demo vs canonical vault
+
+The Vault API can point at either the demo vault (a 30/40/30 meta-allocator) or
+the canonical Blend vault:
+
+```bash
+# demo (allocator 30/40/30)
+cp services/vault/api/.env.demo services/vault/api/.env && (cd services && docker compose up -d)
+
+# canonical (Blend, default)
+rm services/vault/api/.env && (cd services && docker compose up -d)
+```
+
+---
+
+## Secrets (gitignored — never commit)
+
+| File | Holds |
+|------|-------|
+| `services/vault/scripts/.sa-tracer.env` | Throwaway agent Ed25519 secret for the SA tracer |
+| `services/agent/.env` | KEK, JWT secret, Gemini key, Telegram token, facilitator + Mongo/Redis config (see [`services/agent/.env.example`](services/agent/.env.example)) |
+| `extension/extension/.env` | `BAKU_API_URL` (the Vault API base URL), `BACKEND_URL`, `STELLAR_NETWORK` (build-time) |
+
+---
+
+## Conventions
+
+- **On-chain amounts** are always `i128` decimal strings with 7 decimals — never a JS `number`.
+- **Address promotion is manual + reviewable**: after a redeploy, copy IDs from
+  `services/vault/scripts/deployed.testnet.env` into **both**
+  `services/vault/crates/addresses/src/lib.rs` and
+  `services/vault/api/src/addresses.ts` in one commit.
+- The Vault API stays **key-less** (read + build-tx + relay only).
+- The user's key never leaves the extension background worker; the agent key
+  never leaves `services/agent/` (envelope-encrypted in Mongo).
+- Vault `redeem` slippage floor is enforced **on-chain** — don't move it client-side.
+- `soroban-sdk` is pinned to **25.3.1** and the OZ `stellar-*` crates to **0.7.1** —
+  do not bump (Protocol 26 breaks both).
+
+---
+
+## Subprojects
+
+Everything lives in this single repo as ordinary subfolders — there are no
+separate branches or external upstreams to track. Each subproject is editable in
+place:
+
+| Subproject | Folder |
+|------------|--------|
+| Soroban contracts + Vault API | [`services/vault/`](services/vault/) |
+| Trading-agent backend | [`services/agent/`](services/agent/) |
+| Browser-extension wallet | [`extension/`](extension/) (buildable package: [`extension/extension/`](extension/extension/)) |
+| Client SDK | [`@stellar/freighter-api/`](@stellar/freighter-api/) |
+| Shared libraries | [`@shared/`](@shared/) |
+| Cross-cutting specs & plans | [`services/docs/`](services/docs/) |
 these 2 steps:
 
 ```
